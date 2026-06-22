@@ -1,0 +1,283 @@
+/*
+ * Home Pantry — Styles
+ *
+ * CSS custom properties inherit from Home Assistant's theme system.
+ * When running inside HA's ingress iframe, HA injects its own --primary-color etc.
+ * The fallback values here are used when running standalone (e.g., development).
+ */
+:root {
+  --hp-primary-color: var(--primary-color, #03a9f4);
+  --hp-card-bg: var(--card-background-color, #ffffff);
+  --hp-text-primary: var(--primary-text-color, #212121);
+  --hp-text-secondary: var(--secondary-text-color, #727272);
+  --hp-divider: var(--divider-color, #e0e0e0);
+  --hp-background: var(--primary-background-color, #f5f5f5);
+  --hp-error: var(--error-color, #f44336);
+  --hp-warning: var(--warning-color, #ff9800);
+  --hp-success: #4caf50;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--hp-background);
+  color: var(--hp-text-primary);
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background-color: var(--hp-card-bg);
+  border-bottom: 1px solid var(--hp-divider);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+h1, h2 {
+  margin: 0;
+  font-weight: 400;
+}
+
+.primary-btn {
+  background-color: var(--hp-primary-color);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.2s;
+}
+.primary-btn:hover {
+  opacity: 0.85;
+}
+
+.secondary-btn {
+  background-color: transparent;
+  color: var(--hp-primary-color);
+  border: 1px solid var(--hp-primary-color);
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  width: 100%;
+  transition: background-color 0.2s;
+}
+.secondary-btn:hover {
+  background-color: rgba(3, 169, 244, 0.08);
+}
+
+main {
+  padding: 16px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.card {
+  background-color: var(--hp-card-bg);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  margin-bottom: 16px;
+}
+
+input, select {
+  padding: 8px;
+  border: 1px solid var(--hp-divider);
+  border-radius: 4px;
+  background-color: var(--hp-card-bg);
+  color: var(--hp-text-primary);
+  flex: 1;
+}
+
+.item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hp-divider);
+  gap: 8px;
+}
+
+.item:last-child {
+  border-bottom: none;
+}
+
+.item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.item-name {
+  font-size: 16px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-meta {
+  font-size: 12px;
+  color: var(--hp-text-secondary);
+}
+
+.item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.item-actions button {
+  background: transparent;
+  border: 1px solid var(--hp-divider);
+  color: var(--hp-text-primary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.item-actions button:hover {
+  background-color: var(--hp-divider);
+}
+
+.item-actions .btn-consume {
+  border-color: var(--hp-success);
+  color: var(--hp-success);
+}
+.item-actions .btn-consume:hover {
+  background-color: var(--hp-success);
+  color: #fff;
+}
+
+.item-actions .btn-discard {
+  border-color: var(--hp-error);
+  color: var(--hp-error);
+}
+.item-actions .btn-discard:hover {
+  background-color: var(--hp-error);
+  color: #fff;
+}
+
+.expiring {
+  color: var(--hp-warning);
+  font-weight: 500;
+}
+
+.expired {
+  color: var(--hp-error);
+  font-weight: 600;
+}
+
+/* Toast Notifications */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  padding: 12px 24px;
+  background: #323232;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+  max-width: 90vw;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: var(--hp-background);
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 50px;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background-color: var(--hp-card-bg);
+  width: 90%;
+  max-width: 500px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--hp-divider);
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--hp-text-primary);
+  cursor: pointer;
+}
+
+#reader {
+  width: 100%;
+}
+
+.modal-actions {
+  padding: 16px;
+}
+
+/* Responsive: stack action buttons on small screens */
+@media (max-width: 480px) {
+  .item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .item-actions {
+    width: 100%;
+    margin-top: 8px;
+  }
+  .item-actions button {
+    flex: 1;
+  }
+}

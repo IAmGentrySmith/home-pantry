@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getOptions } from './options.js';
+import { log } from './logger.js';
 
 // Get base URL and token.
 const haBaseUrl = process.env.SUPERVISOR_TOKEN ? 'http://supervisor/core/api' : (process.env.HA_URL || '');
@@ -10,7 +11,8 @@ const client = axios.create({
   headers: {
     'Authorization': `Bearer ${haToken}`,
     'Content-Type': 'application/json'
-  }
+  },
+  timeout: 10000
 });
 
 export async function addItemsToShoppingList(itemName) {
@@ -39,7 +41,7 @@ export async function addItemsToShoppingList(itemName) {
     
     const exists = items.some(i => i.summary && i.summary.toLowerCase() === itemName.toLowerCase());
     if (exists) {
-      console.log(`Item ${itemName} is already on the shopping list. Skipping.`);
+      log.info(`Item ${itemName} is already on the shopping list. Skipping.`);
       return;
     }
 
@@ -47,9 +49,9 @@ export async function addItemsToShoppingList(itemName) {
       entity_id: entityId,
       item: itemName
     });
-    console.log(`Added ${itemName} to ${entityId}`);
+    log.info(`Added ${itemName} to ${entityId}`);
   } catch (err) {
-    console.error("Error adding to HA todo list:", err.message);
+    log.error("Error adding to HA todo list:", err.message);
   }
 }
 
@@ -64,9 +66,9 @@ export async function updateExpiringSensor(expiringCount, expiringItems) {
         items: expiringItems
       }
     });
-    console.log(`Updated sensor.pantry_expiring_items: ${expiringCount}`);
+    log.info(`Updated sensor.pantry_expiring_items: ${expiringCount}`);
   } catch (err) {
-    console.error("Error updating HA sensor:", err.message);
+    log.error("Error updating HA sensor:", err.message);
   }
 }
 
@@ -87,7 +89,7 @@ export async function processConversation(text, agentId) {
         return data.response.speech.plain.speech;
     }
   } catch (err) {
-    console.error("Error processing HA conversation:", err.response?.data || err.message);
+    log.error("Error processing HA conversation:", err.response?.data || err.message);
   }
   return null;
 }

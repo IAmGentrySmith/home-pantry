@@ -22,18 +22,22 @@ Before installing the Add-on, we need to create a dedicated To-Do list for your 
 4. Name your list **Pantry** (or anything you prefer).
 5. Home Assistant will create a new entity (usually named `todo.pantry`). Remember this entity ID for Step 3!
 
+> **Tip — find the exact entity ID:** Go to **Developer Tools > States** (or **Settings > Devices & Services > Entities**) and type `todo.` in the search box to see the precise ID Home Assistant assigned. The Add-on's default is `todo.shopping_list`, so if your list has any other ID you must enter it in Step 3.
+
 ---
 
 ## Step 2: Installation
 
 This Add-on must be installed via the Home Assistant Add-on store.
 
-1. Go to **Settings > Add-ons**.
-2. Click the **Add-on Store** button in the bottom right.
+1. Go to **Settings > Add-ons**. *(On Home Assistant 2026.2 and newer this menu is labelled **Settings > Apps**.)*
+2. Click the **Add-on Store** button in the bottom right (labelled **App store** on newer versions).
 3. Click the three vertical dots (⋮) in the top right corner and select **Repositories**.
-4. Paste the URL of the Git repository hosting this code and click **Add**.
+4. Paste this repository's URL — `https://github.com/IAmGentrySmith/home-pantry` — and click **Add**.
 5. Close the modal and **refresh the page**.
-6. Scroll down until you see the new repository, click **Home Pantry**, and click **Install**. *(This might take a few minutes to download and build the container).*
+6. Scroll down until you see the new **Home Pantry Add-ons** section, click **Home Pantry**, and click **Install**. *(This might take a few minutes to download and build the container.)*
+
+> **Don't see it after refreshing?** The store only recognises a repository that has a `repository.yaml` at its root with each add-on in its own subfolder (this repo ships that layout). Make sure you pasted the exact HTTPS URL above.
 
 ---
 
@@ -49,8 +53,13 @@ Before starting the Add-on, click on the **Configuration** tab at the top of the
 *   **`llm_api_key`**: Your API key (only if you selected `openai` or `gemini` above).
 *   **`llm_model`**: The model to use (e.g., `gpt-4o-mini` or `gemini-1.5-flash`).
 *   **`ha_agent_id`**: (Optional) If you selected `ha_conversation` and have multiple agents, put the specific Agent ID here. Leave blank to use your default HA assistant.
+*   **`api_token`**: (Optional) Only needed for the Voice Assistant REST commands in Step 4 — leave blank otherwise. The web UI never needs it, because it is accessed through Home Assistant's authenticated ingress.
 
-Click **Save**, then go back to the **Info** tab and click **Start**. Check the **Show in sidebar** toggle so you can easily access the Pantry UI!
+Click **Save**, then go back to the **Info** tab and click **Start**. Check the **Show in sidebar** toggle, then click **Open Web UI** (or the new sidebar entry) to access the Pantry UI.
+
+> **Note:** Options are read once at start-up — after changing any setting here, **Restart** the Add-on (Info tab) for it to take effect.
+>
+> **Camera / scanning:** The first time you tap **Scan**, your browser or the Companion App will ask for camera permission — allow it. The camera only works over a secure connection; opening the UI through Home Assistant (ingress, as above) or the Companion App satisfies this automatically.
 
 ---
 
@@ -58,29 +67,40 @@ Click **Save**, then go back to the **Info** tab and click **Start**. Check the 
 
 You can allow your Home Assistant Voice Assistant (like OpenAI ChatGPT or Assist) to directly add or consume items in your pantry!
 
-Because voice assistants usually just give you text (like "Milk") instead of barcodes, the Add-on has special "fuzzy-matching" API endpoints.
+Because voice assistants usually just give you text (like "Milk") instead of barcodes, the Add-on has special "fuzzy-matching" API endpoints. Reaching them needs two one-time setup steps: unlike the web UI (which goes through the authenticated ingress panel), a `rest_command` calls the Add-on *directly*, so the Add-on's network port must be opened and protected with a token.
 
-**1. Add REST Commands to Home Assistant**
-Open your Home Assistant `configuration.yaml` file and paste the following:
+**1. Open the port and set an API token**
+1. On the Add-on page, open the **Configuration** tab and set **`api_token`** to a long random string of your choosing (this acts as the password for the direct API). Click **Save**.
+2. Open the **Network** section (the **Network** tab, or the Network panel within the Configuration tab), set the host port for `8099/tcp` to **`8099`**, and click **Save**. *(It ships disabled, so the API is never exposed on your network without a token.)*
+3. Go to the **Info** tab and click **Restart** so both changes take effect.
+
+**2. Add REST Commands to Home Assistant**
+Open your Home Assistant `configuration.yaml` file and paste the following. Replace `YOUR_API_TOKEN` with the token you just set, and replace `homeassistant.local` with your Home Assistant host name or IP address if `homeassistant.local` doesn't resolve on your network:
 
 ```yaml
 rest_command:
   pantry_add_item:
-    url: "http://localhost:8099/api/add_by_name"
+    url: "http://homeassistant.local:8099/api/add_by_name"
     method: post
     payload: '{"name": "{{ name }}"}'
     content_type: 'application/json'
+    headers:
+      Authorization: "Bearer YOUR_API_TOKEN"
 
   pantry_consume_item:
-    url: "http://localhost:8099/api/consume_by_name"
+    url: "http://homeassistant.local:8099/api/consume_by_name"
     method: post
     payload: '{"name": "{{ name }}"}'
     content_type: 'application/json'
+    headers:
+      Authorization: "Bearer YOUR_API_TOKEN"
 ```
 
-*Restart Home Assistant to apply these changes.*
+> **Why not `localhost`?** A `rest_command` runs inside Home Assistant Core, where `localhost` means Core itself — not the Add-on. You must point it at the Home Assistant host's own address (which is where the Add-on's port is published).
 
-**2. Expose Scripts as Tools**
+*Restart Home Assistant to apply these changes (**Settings > System**, then the power icon in the top-right corner > **Restart Home Assistant**; or **Developer Tools > YAML > Restart**).*
+
+**3. Expose Scripts as Tools**
 Next, create two HA Scripts (Settings > Automations & Scripts > Scripts). 
 *   Create a script called **"Add to Pantry"** that calls the `rest_command.pantry_add_item` service, passing a variable `name`. 
 *   Create another script called **"Consume from Pantry"** that calls `rest_command.pantry_consume_item` with the `name` variable.
@@ -91,7 +111,9 @@ If you use the **OpenAI Conversation Integration** (or similar agents that suppo
 
 ## Step 5: Expiration Notifications (Optional)
 
-The Add-on automatically maintains a sensor in Home Assistant called `sensor.pantry_expiring_items`. The state of this sensor is the **number of items expiring within 7 days**. 
+The Add-on automatically maintains a sensor in Home Assistant called `sensor.pantry_expiring_items`. The state of this sensor is the **number of items expiring within 7 days**.
+
+> **Note:** This sensor is pushed into Home Assistant via its API, so it is **cleared whenever Home Assistant restarts** and reads `unavailable` until the Add-on refreshes it (within 30 minutes, or immediately if the Add-on itself restarts). A notification automation will not fire during that brief window.
 
 To get notified when food is going bad:
 
@@ -102,3 +124,20 @@ To get notified when food is going bad:
 5. **Message**: `You have {{ states('sensor.pantry_expiring_items') }} items expiring soon in your pantry!`
 
 Save the automation, and you will never let food expire again!
+
+---
+
+## Maintenance & Troubleshooting
+
+**Your data lives on the Add-on's private `/data` volume** (`pantry.sqlite`), which survives Add-on restarts and updates.
+
+- **Backup:** It is included automatically in Home Assistant **Settings > System > Backups**. Take a backup before updating or uninstalling.
+- **Update:** When a new version is published, the Add-on page shows an **Update** button; your data is preserved across updates.
+- **Uninstall:** Use the **Uninstall** button on the Add-on page. Uninstalling deletes the `/data` volume (and therefore your pantry database), so back up first if you want to keep it.
+
+**Common issues**
+
+- **Shopping list or sensor not updating?** Open the Add-on **Log** tab. These features need a valid `todo_list_entity_id` (Step 3) and the `homeassistant_api` permission (already declared by the Add-on).
+- **Every expiration date is 14 days?** That is the fallback used when `llm_provider` is `none`, when an `openai`/`gemini` API key is missing, or when the `ha_conversation` agent did not respond. Adjust `llm_provider` in Step 3.
+- **Scanner won't open?** It needs camera permission and a secure context — open the UI through Home Assistant or the Companion App, not over plain `http://`.
+- **Add-on doesn't appear in the store?** See the note under Step 2 (repository layout / exact URL).

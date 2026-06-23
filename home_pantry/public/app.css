@@ -267,6 +267,62 @@ input, select {
   padding: 16px;
 }
 
+/* Dialogs (native <dialog>) */
+.dialog {
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  width: 90%;
+  max-width: 420px;
+  background-color: var(--hp-card-bg);
+  color: var(--hp-text-primary);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+}
+.dialog::backdrop {
+  background: rgba(0,0,0,0.45);
+}
+.dialog form {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.dialog-title {
+  font-size: 18px;
+}
+.dialog-message {
+  margin: 0;
+  font-size: 14px;
+  color: var(--hp-text-secondary);
+}
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dialog-label {
+  font-size: 13px;
+  color: var(--hp-text-secondary);
+}
+.dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  flex: none;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.dialog-actions .secondary-btn,
+.dialog-actions .primary-btn {
+  width: auto;
+}
+.danger-btn {
+  background-color: var(--hp-error);
+}
+
 /* Responsive: stack action buttons on small screens */
 @media (max-width: 480px) {
   .item {

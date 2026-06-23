@@ -313,17 +313,32 @@ const btnCloseScanner = document.getElementById('btn-close-scanner');
 const btnHaScanner = document.getElementById('btn-ha-scanner');
 let html5QrcodeScanner;
 
-btnScan.addEventListener('click', () => {
+// Safely tear down any existing scanner instance. clear() returns a promise,
+// so we await it to avoid leaking/double-rendering a reader on reopen.
+async function teardownScanner() {
+  if (!html5QrcodeScanner) return;
+  try {
+    await html5QrcodeScanner.clear();
+  } catch (err) {
+    console.warn('Scanner teardown failed:', err);
+  }
+  html5QrcodeScanner = null;
+}
+
+btnScan.addEventListener('click', async () => {
+  if (typeof Html5QrcodeScanner === 'undefined') {
+    showToast('Barcode scanner failed to load. Reload the page and try again.', 4000);
+    return;
+  }
+  await teardownScanner(); // ensure no previous instance is still rendered
   modal.classList.remove('hidden');
   html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
   html5QrcodeScanner.render(onScanSuccess, onScanFailure);
 });
 
-btnCloseScanner.addEventListener('click', () => {
+btnCloseScanner.addEventListener('click', async () => {
   modal.classList.add('hidden');
-  if (html5QrcodeScanner) {
-    html5QrcodeScanner.clear();
-  }
+  await teardownScanner();
 });
 
 btnHaScanner.addEventListener('click', () => {
@@ -331,15 +346,13 @@ btnHaScanner.addEventListener('click', () => {
 });
 
 async function onScanSuccess(decodedText, decodedResult) {
-  // Debounce: ignore rapid duplicate scans within 2 seconds
+  // Debounce: ignore rapid duplicate scans from the continuous scanner.
   if (scanDebounceTimer) return;
   scanDebounceTimer = setTimeout(() => { scanDebounceTimer = null; }, 2000);
 
-  if (html5QrcodeScanner) {
-    html5QrcodeScanner.clear();
-  }
+  await teardownScanner();
   modal.classList.add('hidden');
-  
+
   const toast = showToast(`Looking up UPC: ${decodedText}...`);
 
   try {
@@ -386,6 +399,9 @@ async function onScanSuccess(decodedText, decodedResult) {
     }
   } catch (err) {
     removeToast(toast);
+    // Allow an immediate retry after a failed scan rather than waiting out the debounce.
+    clearTimeout(scanDebounceTimer);
+    scanDebounceTimer = null;
     showToast("Scan request failed: " + err.message, 4000);
   }
 }

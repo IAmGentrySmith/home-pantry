@@ -1,6 +1,6 @@
+# Only 64-bit architectures are built. Home Assistant deprecated 32-bit
+# (armv7/armhf/i386) systems in 2025, and the sqlite3 native module ships
+# musl prebuilds for aarch64/amd64 but not 32-bit, so those would fail to build.
 build_from:
   aarch64: "ghcr.io/home-assistant/aarch64-base:latest"
   amd64: "ghcr.io/home-assistant/amd64-base:latest"
-  armv7: "ghcr.io/home-assistant/armv7-base:latest"
-  armhf: "ghcr.io/home-assistant/armhf-base:latest"
-  i386: "ghcr.io/home-assistant/i386-base:latest"

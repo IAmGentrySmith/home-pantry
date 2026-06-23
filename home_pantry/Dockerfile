@@ -12,7 +12,9 @@ RUN \
 # Copy application files
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --production 2>/dev/null || npm install --production
+# --omit=dev replaces the deprecated --production flag. stderr is no longer
+# masked, so any native-module build problem is visible in the add-on build log.
+RUN npm ci --omit=dev || npm install --omit=dev
 
 COPY . .
 

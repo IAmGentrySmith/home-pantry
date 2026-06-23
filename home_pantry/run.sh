@@ -1,15 +1,12 @@
 #!/command/with-contenv bashio
 set -e
 
-echo "Starting Home Pantry..."
+bashio::log.info "Starting Home Pantry..."
 
-# Create database directory in the persistent /share folder if it doesn't exist
-# This ensures the database survives Add-on updates.
-if [ ! -d /share/home_pantry ]; then
-    echo "Creating persistent directory at /share/home_pantry"
-    mkdir -p /share/home_pantry
-fi
+# The database lives on the add-on's private, always-mapped /data volume
+# (the app creates the file if needed), so no directory setup is required here.
 
-# Start the Node.js application
 cd /app
-node server.js
+# exec so Node becomes PID 1 of this script and receives SIGTERM directly,
+# allowing the graceful-shutdown handler in server.js to run on stop.
+exec node server.js

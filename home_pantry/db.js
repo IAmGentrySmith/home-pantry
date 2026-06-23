@@ -1,6 +1,7 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { log } from './logger.js';
 
 // In production the add-on stores its database on its private, always-mapped
 // /data volume (it survives restarts and updates and is not shared with other
@@ -10,7 +11,7 @@ if (!fs.existsSync(dbDir)) {
   try {
     fs.mkdirSync(dbDir, { recursive: true });
   } catch (err) {
-    console.error(`Failed to create db directory at ${dbDir}`, err);
+    log.error(`Failed to create db directory at ${dbDir}`, err);
   }
 }
 
@@ -27,10 +28,10 @@ function migrateLegacyShareDb() {
       for (const suffix of ['', '-wal', '-shm']) {
         if (fs.existsSync(legacy + suffix)) fs.copyFileSync(legacy + suffix, dbPath + suffix);
       }
-      console.log(`Migrated existing database from ${legacy} to ${dbPath}`);
+      log.info(`Migrated existing database from ${legacy} to ${dbPath}`);
     }
   } catch (err) {
-    console.error('Failed to migrate legacy /share database:', err.message);
+    log.error('Failed to migrate legacy /share database:', err.message);
   }
 }
 migrateLegacyShareDb();
@@ -99,6 +100,10 @@ const MIGRATIONS = [
     await run(`ALTER TABLE inventory ADD COLUMN created_at TEXT`);
     await run(`ALTER TABLE inventory ADD COLUMN consumed_at TEXT`);
   },
+  // v3 -> drop the unused quantity column (each physical item is its own row)
+  async () => {
+    await run(`ALTER TABLE inventory DROP COLUMN quantity`);
+  },
 ];
 
 export async function initDb() {
@@ -124,7 +129,7 @@ export async function purgeOldConsumed(days = 90) {
     `DELETE FROM inventory WHERE consumed = 1 AND consumed_at IS NOT NULL AND consumed_at < ?`,
     [cutoff.toISOString()]
   );
-  if (result.changes > 0) console.log(`Purged ${result.changes} consumed item(s) older than ${days} days.`);
+  if (result.changes > 0) log.info(`Purged ${result.changes} consumed item(s) older than ${days} days.`);
   return result.changes;
 }
 
@@ -136,10 +141,10 @@ export function closeDb() {
   return new Promise((resolve, reject) => {
     db.close((err) => {
       if (err) {
-        console.error('Error closing database:', err.message);
+        log.error('Error closing database:', err.message);
         reject(err);
       } else {
-        console.log('Database connection closed cleanly.');
+        log.info('Database connection closed cleanly.');
         resolve();
       }
     });

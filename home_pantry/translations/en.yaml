@@ -30,3 +30,8 @@ configuration:
       Optional bearer token protecting the direct API used by the Voice
       Assistant REST commands (see the documentation). Leave blank unless you
       enable the network port for voice control.
+  log_level:
+    name: Log level
+    description: >-
+      How much detail to write to the add-on log: debug, info (default),
+      warning, or error.

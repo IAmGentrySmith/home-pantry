@@ -8,6 +8,7 @@ import {
   escapeLike, isValidUPC, computeExpirationDate, todayISO,
   toLocalISODate, isValidCalendarDate,
 } from './helpers.js';
+import { log } from './logger.js';
 
 const app = express();
 const port = process.env.PORT || 8099;
@@ -17,6 +18,14 @@ const port = process.env.PORT || 8099;
 // below is disabled and access is open.
 const RUNNING_AS_ADDON = !!process.env.SUPERVISOR_TOKEN;
 const API_TOKEN = getOptions().api_token || '';
+// The HA Supervisor proxies all ingress traffic from this fixed IP. Official
+// guidance is that add-ons should trust ingress requests ONLY from this source.
+const SUPERVISOR_IP = process.env.SUPERVISOR_IP || '172.30.32.2';
+
+function isFromSupervisor(req) {
+  const ra = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  return ra === SUPERVISOR_IP;
+}
 
 app.use(express.json());
 
@@ -33,7 +42,11 @@ app.use(express.static('public'));
 // publishing the port would otherwise open, while keeping the voice REST commands usable.
 function apiAuth(req, res, next) {
   if (!RUNNING_AS_ADDON) return next();
-  if (req.get('X-Ingress-Path') !== undefined) return next();
+  // Genuine ingress requests are proxied by the Supervisor, so they BOTH carry
+  // X-Ingress-Path AND originate from the Supervisor IP. Requiring both means a
+  // LAN client that reached the optional published port cannot bypass auth by
+  // forging the header.
+  if (req.get('X-Ingress-Path') !== undefined && isFromSupervisor(req)) return next();
   if (API_TOKEN && req.get('Authorization') === `Bearer ${API_TOKEN}`) return next();
   return res.status(401).json({
     error: 'Unauthorized. Direct (non-ingress) API access requires a bearer token: set the "api_token" add-on option and send the "Authorization: Bearer <token>" header.'
@@ -71,7 +84,7 @@ function tooLong(...values) {
 // 1. Get all inventory
 app.get('/api/inventory', asyncHandler(async (req, res) => {
   const items = await query(`
-    SELECT i.id, i.upc, i.added_date, i.expiration_date, i.quantity, p.name, p.category, p.default_expiration_days
+    SELECT i.id, i.upc, i.added_date, i.expiration_date, p.name, p.category, p.default_expiration_days
     FROM inventory i
     JOIN products p ON i.upc = p.upc
     WHERE i.consumed = 0
@@ -316,7 +329,7 @@ app.post('/api/add_by_name', asyncHandler(async (req, res) => {
 app.use((err, req, res, _next) => {
   // Log the full error (with stack) server-side; return a generic message so we
   // don't leak SQL text or file paths to the client.
-  console.error('Unhandled route error:', err);
+  log.error('Unhandled route error:', err);
   res.status(500).json({ error: 'Internal server error.' });
 });
 
@@ -343,7 +356,7 @@ async function checkExpiringItems() {
 
     await updateExpiringSensor(count, items);
   } catch (err) {
-    console.error("Error in checkExpiringItems:", err.message);
+    log.error("Error in checkExpiringItems:", err.message);
   }
 }
 
@@ -352,28 +365,28 @@ let expiringInterval;
 let purgeInterval;
 
 initDb().then(() => {
-  console.log("Database initialized");
+  log.info("Database initialized");
   app.listen(port, () => {
-    console.log(`Pantry Add-on server listening on port ${port}`);
+    log.info(`Pantry Add-on server listening on port ${port}`);
     checkExpiringItems();
-    purgeOldConsumed().catch(err => console.error("Purge error:", err.message));
+    purgeOldConsumed().catch(err => log.error("Purge error:", err.message));
     // Refresh the expiring-items sensor every 30 min so that a just-restarted HA
     // (whose API-pushed sensor was cleared on restart) repopulates promptly.
     expiringInterval = setInterval(checkExpiringItems, 1000 * 60 * 30);
     // Purge old consumed rows once a day.
     purgeInterval = setInterval(
-      () => purgeOldConsumed().catch(err => console.error("Purge error:", err.message)),
+      () => purgeOldConsumed().catch(err => log.error("Purge error:", err.message)),
       1000 * 60 * 60 * 24
     );
   });
 }).catch(err => {
-  console.error("Failed to initialize database", err);
+  log.error("Failed to initialize database", err);
   process.exit(1);
 });
 
 // --- Graceful Shutdown ---
 async function shutdown(signal) {
-  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+  log.info(`\nReceived ${signal}. Shutting down gracefully...`);
   clearInterval(expiringInterval);
   clearInterval(purgeInterval);
   try {

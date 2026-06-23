@@ -2,6 +2,7 @@ import axios from 'axios';
 import { getOptions } from './options.js';
 import { processConversation } from './ha_api.js';
 import { parseShelfLifeDays } from './helpers.js';
+import { log } from './logger.js';
 
 /**
  * Estimate shelf life for a product using the configured LLM provider.
@@ -19,7 +20,7 @@ export async function estimateShelfLife(productName, category) {
 
   // External LLM providers require an API key
   if (['openai', 'gemini'].includes(options.llm_provider) && !options.llm_api_key) {
-    console.warn(`LLM provider "${options.llm_provider}" selected but no API key provided. Defaulting to 14 days.`);
+    log.warning(`LLM provider "${options.llm_provider}" selected but no API key provided. Defaulting to 14 days.`);
     return { days: 14, llm_used: false };
   }
   
@@ -63,14 +64,14 @@ export async function estimateShelfLife(productName, category) {
         return { days: parseShelfLifeDays(responseText), llm_used: true };
       }
       // processConversation returned null — HA Conversation is misconfigured or unavailable
-      console.warn('ha_conversation provider returned no response. Is the Conversation integration configured?');
+      log.warning('ha_conversation provider returned no response. Is the Conversation integration configured?');
     }
   } catch (err) {
     // Redact URLs that may contain API keys
     const safeMessage = err.response?.data
       ? JSON.stringify(err.response.data)
       : err.message;
-    console.error("LLM Error:", safeMessage);
+    log.error("LLM Error:", safeMessage);
   }
   
   return { days: 14, llm_used: false };

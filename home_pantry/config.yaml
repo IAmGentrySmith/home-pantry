@@ -37,6 +37,7 @@ options:
   llm_model: "gpt-4o-mini"
   ha_agent_id: ""
   api_token: ""
+  log_level: "info"
 schema:
   todo_list_entity_id: str
   llm_provider: list(openai|gemini|ha_conversation|none)
@@ -44,3 +45,4 @@ schema:
   llm_model: str
   ha_agent_id: str?
   api_token: password?
+  log_level: list(debug|info|warning|error)?

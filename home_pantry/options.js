@@ -26,7 +26,9 @@ export function getOptions() {
     llm_provider: "none",
     llm_api_key: "",
     llm_model: "gpt-4o-mini",
-    ha_agent_id: ""
+    ha_agent_id: "",
+    api_token: "",
+    log_level: "info"
   };
   return cachedOptions;
 }

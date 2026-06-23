@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { log } from './logger.js';
 
 export async function lookupUPC(upc) {
   try {
@@ -16,7 +17,7 @@ export async function lookupUPC(upc) {
       };
     }
   } catch (error) {
-    console.error("Open Food Facts API error:", error.message);
+    log.error("Open Food Facts API error:", error.message);
   }
   return null;
 }

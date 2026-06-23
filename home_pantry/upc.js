@@ -3,7 +3,10 @@ import axios from 'axios';
 export async function lookupUPC(upc) {
   try {
     const url = `https://world.openfoodfacts.org/api/v0/product/${upc}.json`;
-    const response = await axios.get(url, { headers: { 'User-Agent': 'HomePantry - HomeAssistant Add-on - 1.0' } });
+    const response = await axios.get(url, {
+      headers: { 'User-Agent': 'HomePantry - HomeAssistant Add-on - 1.0' },
+      timeout: 10000
+    });
     if (response.data && response.data.status === 1) {
       const product = response.data.product;
       return {

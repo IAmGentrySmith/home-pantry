@@ -8,9 +8,14 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { initDb, query, run, closeDb } from '../db.js';
+import { initDb, query, run, closeDb, withTransaction, purgeOldConsumed } from '../db.js';
+import {
+  escapeLike, isValidUPC, computeExpirationDate, toLocalISODate,
+  parseShelfLifeDays, isValidCalendarDate,
+} from '../helpers.js';
 
-// Set environment to development so the DB uses ./data/ instead of /share/
+// Set environment to development so the DB uses ./data/ instead of /data/.
+// (npm test also sets NODE_ENV=development in the environment before import.)
 process.env.NODE_ENV = 'development';
 
 describe('Database Operations', () => {
@@ -181,19 +186,57 @@ describe('Database Operations', () => {
     assert.equal(expiring.length, 1);
     assert.equal(expiring[0].name, 'Expiring Yogurt');
   });
+
+  it('should chain-merge products without violating foreign keys', async () => {
+    // Mirrors the /api/merge_products transaction. Before the fix, merging
+    // B -> C after A -> B threw a FOREIGN KEY error on the source delete.
+    for (const upc of ['000000000001', '000000000002', '000000000003']) {
+      await run(`INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`,
+        [upc, 'P' + upc, 'Misc', 7]);
+      await run(`INSERT INTO inventory (upc, added_date, expiration_date) VALUES (?, ?, ?)`,
+        [upc, '2026-01-01', '2026-02-01']);
+    }
+    const merge = (source, target) => withTransaction(async () => {
+      await run(`UPDATE inventory SET upc = ? WHERE upc = ?`, [target, source]);
+      await run(`UPDATE upc_aliases SET target_upc = ? WHERE target_upc = ?`, [target, source]);
+      await run(`INSERT OR REPLACE INTO upc_aliases (alias_upc, target_upc) VALUES (?, ?)`, [source, target]);
+      await run(`DELETE FROM products WHERE upc = ?`, [source]);
+    });
+
+    await merge('000000000001', '000000000002'); // A -> B
+    await merge('000000000002', '000000000003'); // B -> C
+
+    const cInv = await query(`SELECT COUNT(*) AS n FROM inventory WHERE upc = ?`, ['000000000003']);
+    assert.equal(cInv[0].n, 3);
+    const remaining = await query(`SELECT upc FROM products`);
+    assert.equal(remaining.length, 1);
+    assert.equal(remaining[0].upc, '000000000003');
+    // Alias A was re-pointed to C, not left dangling at the deleted B
+    const aliasA = await query(`SELECT target_upc FROM upc_aliases WHERE alias_upc = ?`, ['000000000001']);
+    assert.equal(aliasA[0].target_upc, '000000000003');
+  });
+
+  it('purgeOldConsumed should delete only old consumed rows', async () => {
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`,
+      ['000000000009', 'Old', 'Misc', 7]);
+    const old = new Date(); old.setDate(old.getDate() - 200);
+    await run(`INSERT INTO inventory (upc, added_date, expiration_date, consumed, consumed_at) VALUES (?, ?, ?, 1, ?)`,
+      ['000000000009', '2025-01-01', '2025-02-01', old.toISOString()]);
+    await run(`INSERT INTO inventory (upc, added_date, expiration_date, consumed, consumed_at) VALUES (?, ?, ?, 1, ?)`,
+      ['000000000009', '2026-01-01', '2026-02-01', new Date().toISOString()]);
+    await run(`INSERT INTO inventory (upc, added_date, expiration_date) VALUES (?, ?, ?)`,
+      ['000000000009', '2026-06-01', '2026-07-01']);
+
+    const purged = await purgeOldConsumed(90);
+    assert.equal(purged, 1);
+    const remaining = await query(`SELECT COUNT(*) AS n FROM inventory`);
+    assert.equal(remaining[0].n, 2);
+  });
 });
 
-describe('Helper Functions', () => {
+describe('Helper Functions (real implementations from helpers.js)', () => {
   it('isValidUPC should accept standard barcode formats', () => {
-    // Import dynamically since server.js starts Express
-    // We'll test the logic inline since the helpers aren't exported from server.js
-    function isValidUPC(upc) {
-      if (!upc || typeof upc !== 'string') return false;
-      if (upc.startsWith('generic_')) return true;
-      return /^\d{8,14}$/.test(upc.trim());
-    }
-
-    assert.equal(isValidUPC('012345678905'), true);   // UPC-A (12 digits)
+    assert.equal(isValidUPC('012345678905'), true);    // UPC-A (12 digits)
     assert.equal(isValidUPC('0123456789012'), true);   // EAN-13 (13 digits)
     assert.equal(isValidUPC('01234567'), true);         // EAN-8 (8 digits)
     assert.equal(isValidUPC('generic_123456'), true);  // Internal generic
@@ -205,35 +248,42 @@ describe('Helper Functions', () => {
   });
 
   it('escapeLike should escape LIKE wildcards', () => {
-    function escapeLike(str) {
-      return str.replace(/%/g, '\\%').replace(/_/g, '\\_');
-    }
-
     assert.equal(escapeLike('milk'), 'milk');
     assert.equal(escapeLike('100%'), '100\\%');
     assert.equal(escapeLike('_test_'), '\\_test\\_');
     assert.equal(escapeLike('%_%'), '\\%\\_\\%');
   });
 
-  it('computeExpirationDate should return null for non-perishable', () => {
-    function computeExpirationDate(days) {
-      if (!days || days <= 0) return null;
-      const exp = new Date();
-      exp.setDate(exp.getDate() + days);
-      return exp.toISOString().split('T')[0];
-    }
-
+  it('computeExpirationDate returns null for non-perishable, else a local date', () => {
     assert.equal(computeExpirationDate(0), null);
     assert.equal(computeExpirationDate(null), null);
     assert.equal(computeExpirationDate(-1), null);
 
-    // Positive days should return a future date
     const result = computeExpirationDate(7);
     assert.ok(result);
     assert.match(result, /^\d{4}-\d{2}-\d{2}$/);
 
     const expected = new Date();
     expected.setDate(expected.getDate() + 7);
-    assert.equal(result, expected.toISOString().split('T')[0]);
+    assert.equal(result, toLocalISODate(expected));
+  });
+
+  it('parseShelfLifeDays preserves a genuine 0 and defaults only on no number', () => {
+    assert.equal(parseShelfLifeDays('0'), 0);          // non-perishable preserved (was the bug)
+    assert.equal(parseShelfLifeDays('7'), 7);
+    assert.equal(parseShelfLifeDays('about 10 days'), 10);
+    assert.equal(parseShelfLifeDays(''), 14);          // empty -> default
+    assert.equal(parseShelfLifeDays('unknown'), 14);   // no digits -> default
+    assert.equal(parseShelfLifeDays(14), 14);
+  });
+
+  it('isValidCalendarDate rejects bad formats and overflows', () => {
+    assert.equal(isValidCalendarDate('2026-06-23'), true);
+    assert.equal(isValidCalendarDate('2024-02-29'), true);  // valid leap day
+    assert.equal(isValidCalendarDate('2026-02-30'), false); // overflow
+    assert.equal(isValidCalendarDate('2026-99-99'), false); // impossible
+    assert.equal(isValidCalendarDate('2026-6-3'), false);   // wrong format
+    assert.equal(isValidCalendarDate('not-a-date'), false);
+    assert.equal(isValidCalendarDate(null), false);
   });
 });

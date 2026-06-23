@@ -10,7 +10,8 @@ const client = axios.create({
   headers: {
     'Authorization': `Bearer ${haToken}`,
     'Content-Type': 'application/json'
-  }
+  },
+  timeout: 10000
 });
 
 export async function addItemsToShoppingList(itemName) {

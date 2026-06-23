@@ -1,9 +1,13 @@
 import express from 'express';
-import { initDb, query, run, closeDb } from './db.js';
+import { initDb, query, run, closeDb, withTransaction, purgeOldConsumed } from './db.js';
 import { lookupUPC } from './upc.js';
 import { estimateShelfLife } from './llm.js';
 import { addItemsToShoppingList, updateExpiringSensor } from './ha_api.js';
 import { getOptions } from './options.js';
+import {
+  escapeLike, isValidUPC, computeExpirationDate, todayISO,
+  toLocalISODate, isValidCalendarDate,
+} from './helpers.js';
 
 const app = express();
 const port = process.env.PORT || 8099;
@@ -50,37 +54,16 @@ function asyncHandler(fn) {
   };
 }
 
-/**
- * Escape LIKE wildcard characters in user input to prevent LIKE injection.
- */
-function escapeLike(str) {
-  return str.replace(/%/g, '\\%').replace(/_/g, '\\_');
-}
+// Pure helpers (escapeLike, isValidUPC, computeExpirationDate, todayISO,
+// isValidCalendarDate) live in helpers.js so the tests exercise the real code.
 
-/**
- * Basic UPC format validation.
- * Accepts: standard UPC-A (12 digits), EAN-13 (13 digits), EAN-8 (8 digits),
- * and internal/generic UPCs starting with 'generic_'.
- */
-function isValidUPC(upc) {
-  if (!upc || typeof upc !== 'string') return false;
-  if (upc.startsWith('generic_')) return true;
-  return /^\d{8,14}$/.test(upc.trim());
-}
+/** Current timestamp as an ISO string (used for created_at / consumed_at columns). */
+const nowIso = () => new Date().toISOString();
 
-/**
- * Compute an ISO date string (YYYY-MM-DD) that is `days` days from today.
- * Returns null if days is falsy or <= 0.
- */
-function computeExpirationDate(days) {
-  if (!days || days <= 0) return null;
-  const exp = new Date();
-  exp.setDate(exp.getDate() + days);
-  return exp.toISOString().split('T')[0];
-}
-
-function todayISO() {
-  return new Date().toISOString().split('T')[0];
+/** Reject absurdly long free-text fields to prevent DB bloat / abuse. */
+const MAX_TEXT_LEN = 200;
+function tooLong(...values) {
+  return values.some((v) => typeof v === 'string' && v.length > MAX_TEXT_LEN);
 }
 
 // --- Routes ---
@@ -126,27 +109,27 @@ app.post('/api/scan', asyncHandler(async (req, res) => {
     const { days, llm_used } = await estimateShelfLife(name, category);
     
     // Use actualUpc (resolved alias) — not the original scanned UPC
-    await run(`INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`, 
-      [actualUpc, name, category, days]);
-      
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days, created_at) VALUES (?, ?, ?, ?, ?)`,
+      [actualUpc, name, category, days, nowIso()]);
+
     product = [{ upc: actualUpc, name, category, default_expiration_days: days }];
 
     const prod = product[0];
     const expirationDate = computeExpirationDate(prod.default_expiration_days);
 
-    await run(`INSERT INTO inventory (upc, added_date, expiration_date) VALUES (?, ?, ?)`,
-      [prod.upc, todayISO(), expirationDate]);
+    await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
+      [prod.upc, todayISO(), expirationDate, nowIso()]);
 
     res.json({ success: true, product: prod, expiration_date: expirationDate, llm_used });
   } else {
-    // Product already existed — no LLM call needed
+    // Product already existed — no LLM call ran, so report llm_used: false
     const prod = product[0];
     const expirationDate = computeExpirationDate(prod.default_expiration_days);
 
-    await run(`INSERT INTO inventory (upc, added_date, expiration_date) VALUES (?, ?, ?)`,
-      [prod.upc, todayISO(), expirationDate]);
+    await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
+      [prod.upc, todayISO(), expirationDate, nowIso()]);
 
-    res.json({ success: true, product: prod, expiration_date: expirationDate, llm_used: true });
+    res.json({ success: true, product: prod, expiration_date: expirationDate, llm_used: false });
   }
 }));
 
@@ -154,28 +137,32 @@ app.post('/api/scan', asyncHandler(async (req, res) => {
 app.post('/api/scan_custom', asyncHandler(async (req, res) => {
   const { upc, name, category } = req.body;
   if (!upc || !name) return res.status(400).json({ error: "Missing required fields" });
+  if (tooLong(name, category)) return res.status(400).json({ error: `Name and category must be ${MAX_TEXT_LEN} characters or fewer.` });
 
   const trimmedUpc = upc.trim();
+  if (!isValidUPC(trimmedUpc)) {
+    return res.status(400).json({ error: "Invalid UPC format. Expected 8-14 digits." });
+  }
 
   // Check if this product already exists (prevents UNIQUE constraint errors on rapid double-scans)
   const existing = await query(`SELECT * FROM products WHERE upc = ?`, [trimmedUpc]);
   let prod;
 
   if (existing.length > 0) {
-    prod = existing[0];
+    prod = existing[0]; // no LLM call ran
   } else {
     const { days, llm_used } = await estimateShelfLife(name, category || "Misc");
-    await run(`INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`, 
-      [trimmedUpc, name, category || "Misc", days]);
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days, created_at) VALUES (?, ?, ?, ?, ?)`,
+      [trimmedUpc, name, category || "Misc", days, nowIso()]);
     prod = { upc: trimmedUpc, name, category: category || "Misc", default_expiration_days: days, llm_used };
   }
 
   const expirationDate = computeExpirationDate(prod.default_expiration_days);
 
-  await run(`INSERT INTO inventory (upc, added_date, expiration_date) VALUES (?, ?, ?)`,
-    [prod.upc, todayISO(), expirationDate]);
+  await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
+    [prod.upc, todayISO(), expirationDate, nowIso()]);
 
-  res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used: prod.llm_used ?? true });
+  res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used: prod.llm_used ?? false });
 }));
 
 // 2c. Merge Products
@@ -191,9 +178,15 @@ app.post('/api/merge_products', asyncHandler(async (req, res) => {
     return res.status(404).json({ error: `Target product with UPC ${target_upc} does not exist.` });
   }
 
-  await run(`UPDATE inventory SET upc = ? WHERE upc = ?`, [target_upc, source_upc]);
-  await run(`INSERT OR REPLACE INTO upc_aliases (alias_upc, target_upc) VALUES (?, ?)`, [source_upc, target_upc]);
-  await run(`DELETE FROM products WHERE upc = ?`, [source_upc]);
+  // Atomic so a partial failure can't leave inventory re-pointed but the source
+  // product un-deleted. Re-pointing existing aliases first lets chained merges
+  // (A->B then B->C) succeed without tripping the upc_aliases foreign key.
+  await withTransaction(async () => {
+    await run(`UPDATE inventory SET upc = ? WHERE upc = ?`, [target_upc, source_upc]);
+    await run(`UPDATE upc_aliases SET target_upc = ? WHERE target_upc = ?`, [target_upc, source_upc]);
+    await run(`INSERT OR REPLACE INTO upc_aliases (alias_upc, target_upc) VALUES (?, ?)`, [source_upc, target_upc]);
+    await run(`DELETE FROM products WHERE upc = ?`, [source_upc]);
+  });
   res.json({ success: true, message: "Products merged successfully" });
 }));
 
@@ -202,7 +195,7 @@ app.post('/api/consume', asyncHandler(async (req, res) => {
   const { id } = req.body;
   const items = await query(`SELECT p.name FROM inventory i JOIN products p ON i.upc = p.upc WHERE i.id = ?`, [id]);
   if (items.length > 0) {
-    await run(`UPDATE inventory SET consumed = 1 WHERE id = ?`, [id]);
+    await run(`UPDATE inventory SET consumed = 1, consumed_at = ? WHERE id = ?`, [nowIso(), id]);
     await addItemsToShoppingList(items[0].name);
     res.json({ success: true, message: `Consumed ${items[0].name} and added to shopping list.` });
   } else {
@@ -215,7 +208,7 @@ app.post('/api/discard', asyncHandler(async (req, res) => {
   const { id } = req.body;
   const items = await query(`SELECT p.name FROM inventory i JOIN products p ON i.upc = p.upc WHERE i.id = ?`, [id]);
   if (items.length > 0) {
-    await run(`UPDATE inventory SET consumed = 1 WHERE id = ?`, [id]);
+    await run(`UPDATE inventory SET consumed = 1, consumed_at = ? WHERE id = ?`, [nowIso(), id]);
     res.json({ success: true, message: `Discarded ${items[0].name}.` });
   } else {
     res.status(404).json({ error: "Item not found" });
@@ -226,6 +219,8 @@ app.post('/api/discard', asyncHandler(async (req, res) => {
 app.put('/api/products/:upc', asyncHandler(async (req, res) => {
   const { upc } = req.params;
   const { name, category, default_expiration_days } = req.body;
+
+  if (tooLong(name, category)) return res.status(400).json({ error: `Name and category must be ${MAX_TEXT_LEN} characters or fewer.` });
 
   // Fetch current product to merge with provided fields
   const existing = await query(`SELECT * FROM products WHERE upc = ?`, [upc]);
@@ -248,10 +243,11 @@ app.put('/api/inventory/:id/expiration', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { expiration_date } = req.body;
 
-  // Validate date format (YYYY-MM-DD) or allow null to clear
+  // Validate the date is a REAL calendar date (YYYY-MM-DD), or allow null to clear.
+  // isValidCalendarDate rejects both bad formats (2026-99-99) and overflows (2026-02-30).
   if (expiration_date !== null && expiration_date !== undefined) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiration_date)) {
-      return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD." });
+    if (!isValidCalendarDate(expiration_date)) {
+      return res.status(400).json({ error: "Invalid date. Use a real calendar date in YYYY-MM-DD format." });
     }
   }
 
@@ -279,7 +275,7 @@ app.post('/api/consume_by_name', asyncHandler(async (req, res) => {
   `, [`%${escaped}%`]);
 
   if (items.length > 0) {
-    await run(`UPDATE inventory SET consumed = 1 WHERE id = ?`, [items[0].id]);
+    await run(`UPDATE inventory SET consumed = 1, consumed_at = ? WHERE id = ?`, [nowIso(), items[0].id]);
     await addItemsToShoppingList(items[0].name);
     res.json({ success: true, message: `Consumed ${items[0].name}` });
   } else {
@@ -291,34 +287,37 @@ app.post('/api/consume_by_name', asyncHandler(async (req, res) => {
 app.post('/api/add_by_name', asyncHandler(async (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: "Missing name" });
+  if (tooLong(name)) return res.status(400).json({ error: `Name must be ${MAX_TEXT_LEN} characters or fewer.` });
 
   const escaped = escapeLike(name);
   let products = await query(`SELECT * FROM products WHERE name LIKE ? ESCAPE '\\' LIMIT 1`, [`%${escaped}%`]);
   let prod;
-  
+
   if (products.length > 0) {
-    prod = products[0];
+    prod = products[0]; // matched an existing product — no LLM call ran
   } else {
     const upc = 'generic_' + Date.now();
     const { days, llm_used } = await estimateShelfLife(name, "Generic");
-    await run(`INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`, 
-      [upc, name, "Generic", days]);
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days, created_at) VALUES (?, ?, ?, ?, ?)`,
+      [upc, name, "Generic", days, nowIso()]);
     prod = { upc, name, category: "Generic", default_expiration_days: days, llm_used };
   }
 
   const expirationDate = computeExpirationDate(prod.default_expiration_days);
 
-  await run(`INSERT INTO inventory (upc, added_date, expiration_date) VALUES (?, ?, ?)`,
-    [prod.upc, todayISO(), expirationDate]);
+  await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
+    [prod.upc, todayISO(), expirationDate, nowIso()]);
 
-  res.json({ success: true, message: `Added ${prod.name}`, llm_used: prod.llm_used ?? true });
+  res.json({ success: true, message: `Added ${prod.name}`, llm_used: prod.llm_used ?? false });
 }));
 
 // --- Express Error Handler ---
 // Catches errors thrown/rejected from asyncHandler-wrapped routes
 app.use((err, req, res, _next) => {
-  console.error('Unhandled route error:', err.message);
-  res.status(500).json({ error: err.message });
+  // Log the full error (with stack) server-side; return a generic message so we
+  // don't leak SQL text or file paths to the client.
+  console.error('Unhandled route error:', err);
+  res.status(500).json({ error: 'Internal server error.' });
 });
 
 // --- Background Task ---
@@ -327,7 +326,7 @@ async function checkExpiringItems() {
     const today = todayISO();
     const nextWeek = new Date();
     nextWeek.setDate(nextWeek.getDate() + 7);
-    const nextWeekStr = nextWeek.toISOString().split('T')[0];
+    const nextWeekStr = toLocalISODate(nextWeek);
 
     const expiring = await query(`
       SELECT i.id, p.name, i.expiration_date 
@@ -350,13 +349,22 @@ async function checkExpiringItems() {
 
 // --- Startup ---
 let expiringInterval;
+let purgeInterval;
 
 initDb().then(() => {
   console.log("Database initialized");
   app.listen(port, () => {
     console.log(`Pantry Add-on server listening on port ${port}`);
     checkExpiringItems();
-    expiringInterval = setInterval(checkExpiringItems, 1000 * 60 * 60);
+    purgeOldConsumed().catch(err => console.error("Purge error:", err.message));
+    // Refresh the expiring-items sensor every 30 min so that a just-restarted HA
+    // (whose API-pushed sensor was cleared on restart) repopulates promptly.
+    expiringInterval = setInterval(checkExpiringItems, 1000 * 60 * 30);
+    // Purge old consumed rows once a day.
+    purgeInterval = setInterval(
+      () => purgeOldConsumed().catch(err => console.error("Purge error:", err.message)),
+      1000 * 60 * 60 * 24
+    );
   });
 }).catch(err => {
   console.error("Failed to initialize database", err);
@@ -367,6 +375,7 @@ initDb().then(() => {
 async function shutdown(signal) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
   clearInterval(expiringInterval);
+  clearInterval(purgeInterval);
   try {
     await closeDb();
   } catch {

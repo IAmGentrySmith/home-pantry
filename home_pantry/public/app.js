@@ -40,6 +40,84 @@ function removeToast(toast) {
   }
 }
 
+// --- Dialogs (accessible replacements for native prompt()/confirm()) ---
+
+const formDialog = document.getElementById('form-dialog');
+
+/**
+ * Show a modal dialog with optional input fields. Uses the native <dialog>
+ * element, which provides focus trapping, Escape-to-close and a backdrop.
+ * Resolves to an object of field values keyed by name, or null if cancelled.
+ */
+function showDialog({ title, message = '', fields = [], submitText = 'Save', cancelText = 'Cancel', danger = false }) {
+  return new Promise((resolve) => {
+    formDialog.innerHTML = '';
+    const form = document.createElement('form');
+
+    form.appendChild(el('h2', title, 'dialog-title'));
+    if (message) form.appendChild(el('p', message, 'dialog-message'));
+
+    const inputs = [];
+    fields.forEach((f, i) => {
+      const wrap = el('div', null, 'dialog-field');
+      const id = `dlg-field-${i}`;
+      const label = el('label', f.label, 'dialog-label');
+      label.htmlFor = id;
+      const input = document.createElement('input');
+      input.id = id;
+      input.name = f.name;
+      input.type = f.type || 'text';
+      if (f.value != null) input.value = f.value;
+      if (f.placeholder) input.placeholder = f.placeholder;
+      if (f.required) input.required = true;
+      if (f.min != null) input.min = f.min;
+      input.className = 'dialog-input';
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      form.appendChild(wrap);
+      inputs.push(input);
+    });
+
+    const actions = el('div', null, 'dialog-actions');
+    const cancelBtn = el('button', cancelText, 'secondary-btn');
+    cancelBtn.type = 'button';
+    const submitBtn = el('button', submitText, danger ? 'primary-btn danger-btn' : 'primary-btn');
+    submitBtn.type = 'submit';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(submitBtn);
+    form.appendChild(actions);
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      formDialog.removeEventListener('close', onClose);
+      if (formDialog.open) formDialog.close();
+      resolve(result);
+    };
+    const onClose = () => finish(null); // Escape key / backdrop
+
+    cancelBtn.addEventListener('click', () => finish(null));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault(); // native required-field validation still runs first
+      const values = {};
+      inputs.forEach((inp) => { values[inp.name] = inp.value; });
+      finish(values);
+    });
+    formDialog.addEventListener('close', onClose);
+
+    formDialog.appendChild(form);
+    formDialog.showModal();
+    if (inputs[0]) inputs[0].focus();
+  });
+}
+
+/** Yes/no confirmation dialog. Resolves true if confirmed. */
+async function showConfirm({ title, message, confirmText = 'OK', cancelText = 'Cancel', danger = false }) {
+  const result = await showDialog({ title, message, fields: [], submitText: confirmText, cancelText, danger });
+  return result !== null;
+}
+
 // --- Data Loading ---
 
 async function loadInventory() {
@@ -194,7 +272,11 @@ function renderExpiring() {
 // --- Actions ---
 
 async function consumeItem(id) {
-  if (!confirm("Consume this item and add it to your shopping list?")) return;
+  if (!(await showConfirm({
+    title: 'Consume item',
+    message: 'Consume this item and add it to your shopping list?',
+    confirmText: 'Consume',
+  }))) return;
   try {
     const res = await fetch('./api/consume', {
       method: 'POST',
@@ -211,7 +293,12 @@ async function consumeItem(id) {
 }
 
 async function discardItem(id) {
-  if (!confirm("Discard this item? It will NOT be added to your shopping list.")) return;
+  if (!(await showConfirm({
+    title: 'Discard item',
+    message: 'Discard this item? It will NOT be added to your shopping list.',
+    confirmText: 'Discard',
+    danger: true,
+  }))) return;
   try {
     const res = await fetch('./api/discard', {
       method: 'POST',
@@ -228,15 +315,19 @@ async function discardItem(id) {
 }
 
 async function editProduct(upc, oldName, oldCategory, oldDays) {
-  const name = prompt("Edit product name:", oldName);
-  if (name === null) return; // cancelled
-  const category = prompt("Edit category:", oldCategory);
-  if (category === null) return;
-  const daysStr = prompt("Default shelf life (days, 0 for non-perishable):", oldDays != null ? String(oldDays) : '14');
-  if (daysStr === null) return;
-  
-  const body = { name: name || oldName, category: category || oldCategory };
-  const parsedDays = parseInt(daysStr, 10);
+  const result = await showDialog({
+    title: 'Edit product',
+    fields: [
+      { name: 'name', label: 'Product name', type: 'text', value: oldName, required: true },
+      { name: 'category', label: 'Category', type: 'text', value: oldCategory },
+      { name: 'days', label: 'Default shelf life (days, 0 = non-perishable)', type: 'number', min: 0, value: oldDays != null ? String(oldDays) : '14' },
+    ],
+    submitText: 'Save',
+  });
+  if (!result) return; // cancelled
+
+  const body = { name: result.name || oldName, category: result.category || oldCategory };
+  const parsedDays = parseInt(result.days, 10);
   if (!isNaN(parsedDays)) {
     body.default_expiration_days = parsedDays;
   }
@@ -257,10 +348,16 @@ async function editProduct(upc, oldName, oldCategory, oldDays) {
 }
 
 async function editExpiration(id, currentDate) {
-  const newDate = prompt("Set expiration date (YYYY-MM-DD), or leave blank to clear:", currentDate || '');
-  if (newDate === null) return; // cancelled
+  const result = await showDialog({
+    title: 'Set expiration date',
+    message: 'Leave blank to clear the expiration date.',
+    fields: [{ name: 'date', label: 'Expiration date', type: 'date', value: currentDate || '' }],
+    submitText: 'Save',
+  });
+  if (!result) return; // cancelled
 
-  // Basic client-side validation
+  const newDate = (result.date || '').trim();
+  // A native date input already yields YYYY-MM-DD, but validate defensively.
   if (newDate && !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
     showToast("Invalid date format. Use YYYY-MM-DD.", 4000);
     return;
@@ -282,10 +379,17 @@ async function editExpiration(id, currentDate) {
 }
 
 async function mergeProduct(sourceUpc) {
-  const targetUpc = prompt("Enter the UPC barcode you want to merge THIS item into (all inventory will be transferred to the target UPC):");
+  const result = await showDialog({
+    title: 'Merge product',
+    message: 'Transfer all inventory of THIS item onto another product. Enter the target product’s UPC barcode; this item then becomes an alias of it.',
+    fields: [{ name: 'target', label: 'Target UPC barcode', type: 'text', required: true, placeholder: 'e.g. 0123456789012' }],
+    submitText: 'Merge',
+    danger: true,
+  });
+  if (!result) return; // cancelled
+
+  const targetUpc = (result.target || '').trim();
   if (!targetUpc || targetUpc === sourceUpc) return;
-  
-  if (!confirm(`Are you sure you want to merge this product into UPC ${targetUpc}?`)) return;
 
   try {
     const res = await fetch(`./api/merge_products`, {
@@ -371,16 +475,22 @@ async function onScanSuccess(decodedText, decodedResult) {
       showToast(`Added: ${data.product.name} (Exp: ${expLabel}${llmNote})`, 4000);
       loadInventory();
     } else if (data.needs_info) {
-      const name = prompt("Unknown barcode! What is the name of this product?");
-      if (name) {
-        const category = prompt("What category is it? (e.g. Dairy, Cleaning, Snacks)", "Misc");
-        
+      const info = await showDialog({
+        title: 'Unknown barcode',
+        message: `Barcode ${data.upc} isn't in Open Food Facts. Add it manually:`,
+        fields: [
+          { name: 'name', label: 'Product name', type: 'text', required: true },
+          { name: 'category', label: 'Category', type: 'text', value: 'Misc' },
+        ],
+        submitText: 'Add',
+      });
+      if (info && info.name) {
         const toast2 = showToast("Estimating expiration date...");
 
         const customRes = await fetch('./api/scan_custom', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ upc: data.upc, name, category })
+          body: JSON.stringify({ upc: data.upc, name: info.name, category: info.category })
         });
         const customData = await customRes.json();
         removeToast(toast2);

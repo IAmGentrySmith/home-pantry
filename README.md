@@ -28,12 +28,14 @@ Before installing the Add-on, we need to create a dedicated To-Do list for your 
 
 This Add-on must be installed via the Home Assistant Add-on store.
 
-1. Go to **Settings > Add-ons**.
-2. Click the **Add-on Store** button in the bottom right.
+1. Go to **Settings > Add-ons**. *(On Home Assistant 2026.2 and newer this menu is labelled **Settings > Apps**.)*
+2. Click the **Add-on Store** button in the bottom right (labelled **App store** on newer versions).
 3. Click the three vertical dots (⋮) in the top right corner and select **Repositories**.
-4. Paste the URL of the Git repository hosting this code and click **Add**.
+4. Paste this repository's URL — `https://github.com/IAmGentrySmith/home-pantry` — and click **Add**.
 5. Close the modal and **refresh the page**.
-6. Scroll down until you see the new repository, click **Home Pantry**, and click **Install**. *(This might take a few minutes to download and build the container).*
+6. Scroll down until you see the new **Home Pantry Add-ons** section, click **Home Pantry**, and click **Install**. *(This might take a few minutes to download and build the container.)*
+
+> **Don't see it after refreshing?** The store only recognises a repository that has a `repository.yaml` at its root with each add-on in its own subfolder (this repo ships that layout). Make sure you pasted the exact HTTPS URL above.
 
 ---
 
@@ -49,8 +51,9 @@ Before starting the Add-on, click on the **Configuration** tab at the top of the
 *   **`llm_api_key`**: Your API key (only if you selected `openai` or `gemini` above).
 *   **`llm_model`**: The model to use (e.g., `gpt-4o-mini` or `gemini-1.5-flash`).
 *   **`ha_agent_id`**: (Optional) If you selected `ha_conversation` and have multiple agents, put the specific Agent ID here. Leave blank to use your default HA assistant.
+*   **`api_token`**: (Optional) Only needed for the Voice Assistant REST commands in Step 4 — leave blank otherwise. The web UI never needs it, because it is accessed through Home Assistant's authenticated ingress.
 
-Click **Save**, then go back to the **Info** tab and click **Start**. Check the **Show in sidebar** toggle so you can easily access the Pantry UI!
+Click **Save**, then go back to the **Info** tab and click **Start**. Check the **Show in sidebar** toggle, then click **Open Web UI** (or the new sidebar entry) to access the Pantry UI.
 
 ---
 
@@ -58,29 +61,40 @@ Click **Save**, then go back to the **Info** tab and click **Start**. Check the 
 
 You can allow your Home Assistant Voice Assistant (like OpenAI ChatGPT or Assist) to directly add or consume items in your pantry!
 
-Because voice assistants usually just give you text (like "Milk") instead of barcodes, the Add-on has special "fuzzy-matching" API endpoints.
+Because voice assistants usually just give you text (like "Milk") instead of barcodes, the Add-on has special "fuzzy-matching" API endpoints. Reaching them needs two one-time setup steps: unlike the web UI (which goes through the authenticated ingress panel), a `rest_command` calls the Add-on *directly*, so the Add-on's network port must be opened and protected with a token.
 
-**1. Add REST Commands to Home Assistant**
-Open your Home Assistant `configuration.yaml` file and paste the following:
+**1. Open the port and set an API token**
+1. On the Add-on page, open the **Configuration** tab and set **`api_token`** to a long random string of your choosing (this acts as the password for the direct API). Click **Save**.
+2. Open the **Network** section (the **Network** tab, or the Network panel within the Configuration tab), set the host port for `8099/tcp` to **`8099`**, and click **Save**. *(It ships disabled, so the API is never exposed on your network without a token.)*
+3. Go to the **Info** tab and click **Restart** so both changes take effect.
+
+**2. Add REST Commands to Home Assistant**
+Open your Home Assistant `configuration.yaml` file and paste the following. Replace `YOUR_API_TOKEN` with the token you just set, and replace `homeassistant.local` with your Home Assistant host name or IP address if `homeassistant.local` doesn't resolve on your network:
 
 ```yaml
 rest_command:
   pantry_add_item:
-    url: "http://localhost:8099/api/add_by_name"
+    url: "http://homeassistant.local:8099/api/add_by_name"
     method: post
     payload: '{"name": "{{ name }}"}'
     content_type: 'application/json'
+    headers:
+      Authorization: "Bearer YOUR_API_TOKEN"
 
   pantry_consume_item:
-    url: "http://localhost:8099/api/consume_by_name"
+    url: "http://homeassistant.local:8099/api/consume_by_name"
     method: post
     payload: '{"name": "{{ name }}"}'
     content_type: 'application/json'
+    headers:
+      Authorization: "Bearer YOUR_API_TOKEN"
 ```
+
+> **Why not `localhost`?** A `rest_command` runs inside Home Assistant Core, where `localhost` means Core itself — not the Add-on. You must point it at the Home Assistant host's own address (which is where the Add-on's port is published).
 
 *Restart Home Assistant to apply these changes.*
 
-**2. Expose Scripts as Tools**
+**3. Expose Scripts as Tools**
 Next, create two HA Scripts (Settings > Automations & Scripts > Scripts). 
 *   Create a script called **"Add to Pantry"** that calls the `rest_command.pantry_add_item` service, passing a variable `name`. 
 *   Create another script called **"Consume from Pantry"** that calls `rest_command.pantry_consume_item` with the `name` variable.

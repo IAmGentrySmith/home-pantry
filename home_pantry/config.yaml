@@ -1,0 +1,46 @@
+name: "Home Pantry"
+description: "Kitchen Grocery and Pantry Inventory Management with LLM Expiration Dates and Todo Sync."
+version: "1.0.0"
+slug: "home_pantry"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - armhf
+  - i386
+boot: auto
+init: false
+host_network: false
+# Grants access to the Home Assistant Core REST API proxy at http://supervisor/core/api
+# (required for the to-do shopping-list sync, the expiring-items sensor, and the
+# ha_conversation LLM provider). Defaults to false, so it must be declared explicitly.
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+ingress_stream: true
+panel_icon: mdi:basket
+panel_title: "Home Pantry"
+panel_admin: false
+# The web UI is reached through authenticated HA ingress ("Open Web UI" / sidebar panel),
+# so no host port is published by default. The port below stays CLOSED unless you enable it
+# for the optional Voice Assistant REST commands (Step 4); even then it is gated by api_token.
+ports:
+  8099/tcp: null
+ports_description:
+  8099/tcp: "Only needed for the optional Voice Assistant REST commands (README Step 4). Leave disabled otherwise. When enabled, direct access requires the api_token option to be set."
+map:
+  - share:rw
+options:
+  todo_list_entity_id: "todo.shopping_list"
+  llm_provider: "none"
+  llm_api_key: ""
+  llm_model: "gpt-4o-mini"
+  ha_agent_id: ""
+  api_token: ""
+schema:
+  todo_list_entity_id: str
+  llm_provider: list(openai|gemini|ha_conversation|none)
+  llm_api_key: password?
+  llm_model: str
+  ha_agent_id: str?
+  api_token: password?

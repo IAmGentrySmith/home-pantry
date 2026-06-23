@@ -20,8 +20,10 @@ COPY . .
 COPY run.sh /
 RUN chmod a+x /run.sh
 
-# Health check — ensure the Node process is responsive
+# Health check — ensure the Node process is responsive.
+# Uses the lightweight /health route (no DB, no auth) rather than /api/inventory,
+# which is both heavy (a full join) and gated by the API auth middleware.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:8099/api/inventory || exit 1
+  CMD curl -f http://localhost:8099/health || exit 1
 
 CMD [ "/run.sh" ]

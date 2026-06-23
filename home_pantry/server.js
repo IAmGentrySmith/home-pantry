@@ -3,12 +3,39 @@ import { initDb, query, run, closeDb } from './db.js';
 import { lookupUPC } from './upc.js';
 import { estimateShelfLife } from './llm.js';
 import { addItemsToShoppingList, updateExpiringSensor } from './ha_api.js';
+import { getOptions } from './options.js';
 
 const app = express();
 const port = process.env.PORT || 8099;
 
+// When running as a Home Assistant add-on the Supervisor always sets SUPERVISOR_TOKEN.
+// Outside HA (local dev / standalone) there is no ingress layer, so the API auth gate
+// below is disabled and access is open.
+const RUNNING_AS_ADDON = !!process.env.SUPERVISOR_TOKEN;
+const API_TOKEN = getOptions().api_token || '';
+
 app.use(express.json());
+
+// Unauthenticated, DB-free health endpoint for the Docker HEALTHCHECK.
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
 app.use(express.static('public'));
+
+// --- API authentication ---
+// The UI is served through HA ingress, which authenticates the user and injects the
+// X-Ingress-Path header on every proxied request. Direct hits to the optional,
+// default-closed published port do NOT carry that header and must present the
+// configured bearer token (api_token). This closes the unauthenticated-LAN hole that
+// publishing the port would otherwise open, while keeping the voice REST commands usable.
+function apiAuth(req, res, next) {
+  if (!RUNNING_AS_ADDON) return next();
+  if (req.get('X-Ingress-Path') !== undefined) return next();
+  if (API_TOKEN && req.get('Authorization') === `Bearer ${API_TOKEN}`) return next();
+  return res.status(401).json({
+    error: 'Unauthorized. Direct (non-ingress) API access requires a bearer token: set the "api_token" add-on option and send the "Authorization: Bearer <token>" header.'
+  });
+}
+app.use('/api', apiAuth);
 
 // --- Helpers ---
 

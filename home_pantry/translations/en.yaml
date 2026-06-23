@@ -1,0 +1,32 @@
+configuration:
+  todo_list_entity_id:
+    name: To-do list entity ID
+    description: >-
+      The entity ID of the Home Assistant to-do list that consumed items are
+      added to (for example todo.pantry). Find it under Developer Tools >
+      States. Default: todo.shopping_list.
+  llm_provider:
+    name: Expiration estimator
+    description: >-
+      How to estimate shelf life. "none" uses a 14-day default; "openai" and
+      "gemini" require an API key below; "ha_conversation" uses your existing
+      Home Assistant Assist agent.
+  llm_api_key:
+    name: LLM API key
+    description: >-
+      Your OpenAI or Google Gemini API key. Only required when the provider
+      above is "openai" or "gemini".
+  llm_model:
+    name: LLM model
+    description: 'Model name to use, e.g. gpt-4o-mini or gemini-1.5-flash.'
+  ha_agent_id:
+    name: Conversation agent ID
+    description: >-
+      Optional. When using "ha_conversation" with multiple agents, the specific
+      agent ID to use. Leave blank to use your default agent.
+  api_token:
+    name: Voice API token
+    description: >-
+      Optional bearer token protecting the direct API used by the Voice
+      Assistant REST commands (see the documentation). Leave blank unless you
+      enable the network port for voice control.

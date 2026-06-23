@@ -22,6 +22,8 @@ Before installing the Add-on, we need to create a dedicated To-Do list for your 
 4. Name your list **Pantry** (or anything you prefer).
 5. Home Assistant will create a new entity (usually named `todo.pantry`). Remember this entity ID for Step 3!
 
+> **Tip — find the exact entity ID:** Go to **Developer Tools > States** (or **Settings > Devices & Services > Entities**) and type `todo.` in the search box to see the precise ID Home Assistant assigned. The Add-on's default is `todo.shopping_list`, so if your list has any other ID you must enter it in Step 3.
+
 ---
 
 ## Step 2: Installation
@@ -54,6 +56,10 @@ Before starting the Add-on, click on the **Configuration** tab at the top of the
 *   **`api_token`**: (Optional) Only needed for the Voice Assistant REST commands in Step 4 — leave blank otherwise. The web UI never needs it, because it is accessed through Home Assistant's authenticated ingress.
 
 Click **Save**, then go back to the **Info** tab and click **Start**. Check the **Show in sidebar** toggle, then click **Open Web UI** (or the new sidebar entry) to access the Pantry UI.
+
+> **Note:** Options are read once at start-up — after changing any setting here, **Restart** the Add-on (Info tab) for it to take effect.
+>
+> **Camera / scanning:** The first time you tap **Scan**, your browser or the Companion App will ask for camera permission — allow it. The camera only works over a secure connection; opening the UI through Home Assistant (ingress, as above) or the Companion App satisfies this automatically.
 
 ---
 
@@ -92,7 +98,7 @@ rest_command:
 
 > **Why not `localhost`?** A `rest_command` runs inside Home Assistant Core, where `localhost` means Core itself — not the Add-on. You must point it at the Home Assistant host's own address (which is where the Add-on's port is published).
 
-*Restart Home Assistant to apply these changes.*
+*Restart Home Assistant to apply these changes (**Settings > System**, then the power icon in the top-right corner > **Restart Home Assistant**; or **Developer Tools > YAML > Restart**).*
 
 **3. Expose Scripts as Tools**
 Next, create two HA Scripts (Settings > Automations & Scripts > Scripts). 
@@ -105,7 +111,9 @@ If you use the **OpenAI Conversation Integration** (or similar agents that suppo
 
 ## Step 5: Expiration Notifications (Optional)
 
-The Add-on automatically maintains a sensor in Home Assistant called `sensor.pantry_expiring_items`. The state of this sensor is the **number of items expiring within 7 days**. 
+The Add-on automatically maintains a sensor in Home Assistant called `sensor.pantry_expiring_items`. The state of this sensor is the **number of items expiring within 7 days**.
+
+> **Note:** This sensor is pushed into Home Assistant via its API, so it is **cleared whenever Home Assistant restarts** and reads `unavailable` until the Add-on refreshes it (within 30 minutes, or immediately if the Add-on itself restarts). A notification automation will not fire during that brief window.
 
 To get notified when food is going bad:
 
@@ -116,3 +124,20 @@ To get notified when food is going bad:
 5. **Message**: `You have {{ states('sensor.pantry_expiring_items') }} items expiring soon in your pantry!`
 
 Save the automation, and you will never let food expire again!
+
+---
+
+## Maintenance & Troubleshooting
+
+**Your data lives on the Add-on's private `/data` volume** (`pantry.sqlite`), which survives Add-on restarts and updates.
+
+- **Backup:** It is included automatically in Home Assistant **Settings > System > Backups**. Take a backup before updating or uninstalling.
+- **Update:** When a new version is published, the Add-on page shows an **Update** button; your data is preserved across updates.
+- **Uninstall:** Use the **Uninstall** button on the Add-on page. Uninstalling deletes the `/data` volume (and therefore your pantry database), so back up first if you want to keep it.
+
+**Common issues**
+
+- **Shopping list or sensor not updating?** Open the Add-on **Log** tab. These features need a valid `todo_list_entity_id` (Step 3) and the `homeassistant_api` permission (already declared by the Add-on).
+- **Every expiration date is 14 days?** That is the fallback used when `llm_provider` is `none`, when an `openai`/`gemini` API key is missing, or when the `ha_conversation` agent did not respond. Adjust `llm_provider` in Step 3.
+- **Scanner won't open?** It needs camera permission and a secure context — open the UI through Home Assistant or the Companion App, not over plain `http://`.
+- **Add-on doesn't appear in the store?** See the note under Step 2 (repository layout / exact URL).

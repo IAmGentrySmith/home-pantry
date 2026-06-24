@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+- `ai_task` expiration estimator that reuses a Home Assistant **AI Task** entity
+  (`ai_task.generate_data`), so any LLM you've configured in HA — Anthropic/
+  Claude (e.g. Haiku), OpenAI, Google, Ollama — can estimate shelf life with no
+  API key stored in the add-on. New `ai_task_entity_id` option selects the
+  entity (blank uses your preferred one).
+
+### Changed
+- Reworked the configuration page for clarity: provider-specific fields are
+  grouped under the estimator and each notes which provider it applies to.
+  `llm_model` is now optional and defaults to a per-provider model when blank.
+
 ## 1.1.0
 
 ### Added

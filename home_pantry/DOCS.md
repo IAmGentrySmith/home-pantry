@@ -13,10 +13,11 @@ Everything runs locally in this add-on.
 | Option | Description |
 | --- | --- |
 | `todo_list_entity_id` | Entity ID of the to-do list that consumed items are added to (e.g. `todo.pantry`). Find it under **Developer Tools > States**. Default: `todo.shopping_list`. |
-| `llm_provider` | How expiration estimates are made: `none` (14-day default), `openai`, `gemini`, or `ha_conversation` (reuses your Assist agent). |
+| `llm_provider` | How expiration estimates are made. `none` = fixed 14-day default. `ai_task` and `ha_conversation` reuse an LLM you've configured in Home Assistant (no API key stored here). `openai`/`gemini` call those services directly. |
+| `ai_task_entity_id` | Optional `ai_task.*` entity for the `ai_task` provider (**Settings > Voice assistants > AI Task**). Blank uses your preferred AI Task entity. |
+| `ha_agent_id` | Optional conversation agent for `ha_conversation`. Blank uses your default agent. |
 | `llm_api_key` | API key for `openai`/`gemini`. Stored as a secret. |
-| `llm_model` | Model name, e.g. `gpt-4o-mini` or `gemini-1.5-flash`. |
-| `ha_agent_id` | Optional specific agent ID for `ha_conversation`. |
+| `llm_model` | Model for `openai`/`gemini`, e.g. `gpt-4o-mini` or `gemini-1.5-flash`. Blank uses a per-provider default. |
 | `api_token` | Optional bearer token for the Voice Assistant REST commands (see below). |
 | `log_level` | `debug`, `info` (default), `warning`, or `error`. |
 

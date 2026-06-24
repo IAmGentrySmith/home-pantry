@@ -93,3 +93,36 @@ export async function processConversation(text, agentId) {
   }
   return null;
 }
+
+/**
+ * Generate data with a Home Assistant AI Task entity (ai_task.generate_data).
+ *
+ * Lets Home Pantry reuse whatever LLM the user has already configured in HA
+ * (Anthropic/Claude, OpenAI, Google, Ollama, ...) without storing an API key
+ * here. `entityId` selects a specific ai_task.* entity; omit it to use the
+ * user's preferred AI Task entity.
+ *
+ * @returns {string|null} the generated text, or null on error / no response.
+ */
+export async function generateAiTaskData(prompt, entityId) {
+  if (!haBaseUrl || !haToken) return null;
+  try {
+    const payload = {
+      task_name: 'Pantry shelf life estimate',
+      instructions: prompt
+    };
+    if (entityId) payload.entity_id = entityId;
+
+    // ai_task.generate_data returns its result only via the service response,
+    // so we must request it explicitly — without ?return_response the Core API
+    // rejects the call with a 400.
+    const res = await client.post('/services/ai_task/generate_data?return_response=true', payload);
+    const data = res.data?.service_response?.data;
+    if (data != null) {
+      return typeof data === 'string' ? data : String(data);
+    }
+  } catch (err) {
+    log.error("Error calling HA AI Task:", err.response?.data || err.message);
+  }
+  return null;
+}

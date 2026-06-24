@@ -2,34 +2,46 @@ configuration:
   todo_list_entity_id:
     name: To-do list entity ID
     description: >-
-      The entity ID of the Home Assistant to-do list that consumed items are
-      added to (for example todo.pantry). Find it under Developer Tools >
-      States. Default: todo.shopping_list.
+      The Home Assistant to-do list that consumed items are added back onto
+      (your shopping list). Find it under Developer Tools > States, for example
+      todo.shopping_list or todo.pantry. Default: todo.shopping_list.
   llm_provider:
     name: Expiration estimator
     description: >-
-      How to estimate shelf life. "none" uses a 14-day default; "openai" and
-      "gemini" require an API key below; "ha_conversation" uses your existing
-      Home Assistant Assist agent.
-  llm_api_key:
-    name: LLM API key
+      How Home Pantry estimates each item's shelf life. "none" uses a fixed
+      14-day default and needs nothing else. "ai_task" and "ha_conversation"
+      reuse an AI model you have already set up in Home Assistant, so no API key
+      is stored here. "openai" and "gemini" call those services directly and
+      need the API key and model below. Each field below notes which estimator
+      it belongs to — leave the others blank.
+  ai_task_entity_id:
+    name: AI Task entity
     description: >-
-      Your OpenAI or Google Gemini API key. Only required when the provider
-      above is "openai" or "gemini".
-  llm_model:
-    name: LLM model
-    description: 'Model name to use, e.g. gpt-4o-mini or gemini-1.5-flash.'
+      Only for the "ai_task" estimator. The ai_task.* entity to use, found under
+      Settings > Voice assistants > AI Task (for example ai_task.google_ai_task,
+      or an Anthropic/Claude AI Task entity running Haiku). Leave blank to use
+      your preferred AI Task entity.
   ha_agent_id:
-    name: Conversation agent ID
+    name: Conversation agent
     description: >-
-      Optional. When using "ha_conversation" with multiple agents, the specific
-      agent ID to use. Leave blank to use your default agent.
+      Only for the "ha_conversation" estimator. The conversation/Assist agent to
+      use when you have more than one. Leave blank to use your default agent.
+  llm_api_key:
+    name: API key (OpenAI / Gemini)
+    description: >-
+      Only for the "openai" and "gemini" estimators. Your OpenAI or Google
+      Gemini API key. Leave blank for every other estimator.
+  llm_model:
+    name: Model (OpenAI / Gemini)
+    description: >-
+      Only for the "openai" and "gemini" estimators, for example gpt-4o-mini or
+      gemini-1.5-flash. Leave blank to use a sensible default for the provider.
   api_token:
     name: Voice API token
     description: >-
-      Optional bearer token protecting the direct API used by the Voice
-      Assistant REST commands (see the documentation). Leave blank unless you
-      enable the network port for voice control.
+      Advanced and optional. Bearer token protecting the direct API used by the
+      optional Voice Assistant REST commands (see the documentation). Leave
+      blank unless you enable the network port for voice control.
   log_level:
     name: Log level
     description: >-

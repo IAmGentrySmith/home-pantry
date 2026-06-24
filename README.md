@@ -5,7 +5,7 @@ A lightweight, fully local Home Assistant Add-on to manage your kitchen grocery 
 ## Features
 - **Barcode Scanning**: Built-in HTML5 camera scanner designed perfectly for the iOS/Android Companion Apps.
 - **Smart Data Entry**: Automatically queries the Open Food Facts API to identify products based on their UPC barcode.
-- **LLM Expiration Dates**: Optionally uses OpenAI, Google Gemini, or Home Assistant's native Conversation Agent to intelligently estimate shelf-life based on the product name and category!
+- **LLM Expiration Dates**: Optionally uses a Home Assistant AI Task or Conversation agent (Anthropic/Claude, OpenAI, Google, Ollama — whatever you've set up), or a direct OpenAI / Google Gemini key, to intelligently estimate shelf-life based on the product name and category!
 - **Shopping List Sync**: When you click "Consume" on an item, it is automatically added to your native Home Assistant To-do list for your next grocery trip.
 - **Voice Assistant Ready**: Speak to your Home Assistant to add or consume items!
 - **Automations**: Automatically tracks expiring food and emits a `sensor.pantry_expiring_items` entity so you can build HA Automations to notify you when food is going bad.
@@ -47,12 +47,14 @@ Before starting the Add-on, click on the **Configuration** tab at the top of the
 
 *   **`todo_list_entity_id`**: Enter the ID of the list you created in Step 1 (e.g., `todo.pantry`).
 *   **`llm_provider`**: This powers the automatic expiration date estimation. You can choose:
-    *   `none`: Defaults to 14 days.
-    *   `openai` or `gemini`: Requires providing your own API key below.
-    *   `ha_conversation`: Uses whatever AI agent you already have configured in Home Assistant *(Highly recommended if you already use HA Assist!)*.
-*   **`llm_api_key`**: Your API key (only if you selected `openai` or `gemini` above).
-*   **`llm_model`**: The model to use (e.g., `gpt-4o-mini` or `gemini-1.5-flash`).
-*   **`ha_agent_id`**: (Optional) If you selected `ha_conversation` and have multiple agents, put the specific Agent ID here. Leave blank to use your default HA assistant.
+    *   `none`: Defaults to 14 days (no AI).
+    *   `ai_task`: Uses a Home Assistant **AI Task** entity. Works with any LLM you've set up in HA — Anthropic/Claude (e.g. Haiku), OpenAI, Google, Ollama — and no API key is stored in the add-on. *(Recommended.)*
+    *   `ha_conversation`: Uses an existing Home Assistant Assist/Conversation agent. Also keeps your key in HA, not here.
+    *   `openai` or `gemini`: Calls those services directly; requires providing your own API key below.
+*   **`ai_task_entity_id`**: (Optional) For `ai_task`, the specific `ai_task.*` entity to use (**Settings > Voice assistants > AI Task**). Leave blank to use your preferred AI Task entity.
+*   **`ha_agent_id`**: (Optional) For `ha_conversation` with multiple agents, the specific Agent ID. Leave blank to use your default HA assistant.
+*   **`llm_api_key`**: Your API key (only for `openai` or `gemini`).
+*   **`llm_model`**: The model for `openai`/`gemini` (e.g., `gpt-4o-mini` or `gemini-1.5-flash`). Leave blank for a sensible default.
 *   **`api_token`**: (Optional) Only needed for the Voice Assistant REST commands in Step 4 — leave blank otherwise. The web UI never needs it, because it is accessed through Home Assistant's authenticated ingress.
 
 Click **Save**, then go back to the **Info** tab and click **Start**. Check the **Show in sidebar** toggle, then click **Open Web UI** (or the new sidebar entry) to access the Pantry UI.
@@ -60,6 +62,35 @@ Click **Save**, then go back to the **Info** tab and click **Start**. Check the 
 > **Note:** Options are read once at start-up — after changing any setting here, **Restart** the Add-on (Info tab) for it to take effect.
 >
 > **Camera / scanning:** The first time you tap **Scan**, your browser or the Companion App will ask for camera permission — allow it. The camera only works over a secure connection; opening the UI through Home Assistant (ingress, as above) or the Companion App satisfies this automatically.
+
+### Using a Home Assistant LLM integration (recommended)
+
+The `ai_task` and `ha_conversation` estimators don't store any API key in the Add-on — they reuse an AI model you've already configured in Home Assistant. This works with **Anthropic (Claude)**, OpenAI, Google Generative AI, Ollama, or any integration that provides an AI Task or Conversation entity. Claude is used as the example below; the steps are the same for the others.
+
+**1. Add the AI integration to Home Assistant** *(one time)*
+1. Go to **Settings > Devices & Services > + Add Integration**.
+2. Search for **Anthropic** (or OpenAI / Google Generative AI / Ollama), select it, and paste your provider API key.
+3. When asked for a model, pick a fast, inexpensive one — for Claude, **Haiku** (`claude-haiku-4-5`) is ideal for short shelf-life lookups.
+
+That integration then exposes one or both of:
+- an **AI Task** entity (`ai_task.*`) — used by the `ai_task` estimator, and
+- a **Conversation** agent (`conversation.*`) — used by the `ha_conversation` estimator.
+
+> Some integrations add these as separate **AI Task** / **Conversation** sub-entries. Click **Configure** on the integration to add the one you want and choose its model.
+
+**2a. Point Home Pantry at it via AI Task** *(recommended)*
+1. Find your AI Task entity under **Settings > Voice assistants > AI Task** (or search `ai_task.` in **Developer Tools > States**).
+2. In the Add-on **Configuration** tab, set **`llm_provider`** to `ai_task`.
+3. *(Optional)* Set **`ai_task_entity_id`** to that entity (e.g. `ai_task.claude`). Leave it blank to use your **preferred** AI Task entity from the same Settings page.
+4. **Save**, then **Restart** the Add-on.
+
+**2b. Or point it at a Conversation agent via `ha_conversation`**
+Use this if your integration only provides a conversation agent, or you'd rather reuse your existing Assist pipeline.
+1. In the Add-on **Configuration** tab, set **`llm_provider`** to `ha_conversation`.
+2. *(Optional)* Set **`ha_agent_id`** to a specific conversation entity (e.g. `conversation.claude`, found in **Developer Tools > States**). Leave it blank to use your default Assist agent.
+3. **Save**, then **Restart** the Add-on.
+
+> **AI Task vs. `ha_conversation`:** AI Task is purpose-built for "generate a value from a prompt," so it's the better fit for shelf-life estimates. Conversation agents are tuned for chat/voice and may wrap the model with Assist tooling (exposed entities, etc.), which adds latency — reach for `ha_conversation` when that's the only entity your integration exposes, or when you specifically want to reuse your Assist agent.
 
 ---
 
@@ -138,6 +169,6 @@ Save the automation, and you will never let food expire again!
 **Common issues**
 
 - **Shopping list or sensor not updating?** Open the Add-on **Log** tab. These features need a valid `todo_list_entity_id` (Step 3) and the `homeassistant_api` permission (already declared by the Add-on).
-- **Every expiration date is 14 days?** That is the fallback used when `llm_provider` is `none`, when an `openai`/`gemini` API key is missing, or when the `ha_conversation` agent did not respond. Adjust `llm_provider` in Step 3.
+- **Every expiration date is 14 days?** That is the fallback used when `llm_provider` is `none`, when an `openai`/`gemini` API key is missing, or when the `ai_task`/`ha_conversation` entity did not respond. Adjust `llm_provider` in Step 3.
 - **Scanner won't open?** It needs camera permission and a secure context — open the UI through Home Assistant or the Companion App, not over plain `http://`.
 - **Add-on doesn't appear in the store?** See the note under Step 2 (repository layout / exact URL).

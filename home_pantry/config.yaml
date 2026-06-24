@@ -1,6 +1,6 @@
 name: "Home Pantry"
 description: "Kitchen Grocery and Pantry Inventory Management with LLM Expiration Dates and Todo Sync."
-version: "1.1.0"
+version: "1.2.0"
 slug: "home_pantry"
 arch:
   - aarch64
@@ -33,16 +33,18 @@ map:
 options:
   todo_list_entity_id: "todo.shopping_list"
   llm_provider: "none"
-  llm_api_key: ""
-  llm_model: "gpt-4o-mini"
+  ai_task_entity_id: ""
   ha_agent_id: ""
+  llm_api_key: ""
+  llm_model: ""
   api_token: ""
   log_level: "info"
 schema:
   todo_list_entity_id: str
-  llm_provider: list(openai|gemini|ha_conversation|none)
-  llm_api_key: password?
-  llm_model: str
+  llm_provider: list(none|ai_task|ha_conversation|openai|gemini)
+  ai_task_entity_id: str?
   ha_agent_id: str?
+  llm_api_key: password?
+  llm_model: str?
   api_token: password?
   log_level: list(debug|info|warning|error)?

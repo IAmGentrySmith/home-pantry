@@ -24,9 +24,10 @@ export function getOptions() {
   cachedOptions = {
     todo_list_entity_id: "todo.shopping_list",
     llm_provider: "none",
-    llm_api_key: "",
-    llm_model: "gpt-4o-mini",
+    ai_task_entity_id: "",
     ha_agent_id: "",
+    llm_api_key: "",
+    llm_model: "",
     api_token: "",
     log_level: "info"
   };

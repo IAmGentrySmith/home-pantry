@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getOptions } from './options.js';
-import { processConversation } from './ha_api.js';
+import { processConversation, generateAiTaskData } from './ha_api.js';
 import { parseShelfLifeDays } from './helpers.js';
 import { log } from './logger.js';
 
@@ -57,6 +57,14 @@ export async function estimateShelfLife(productName, category) {
       });
       const text = res.data.candidates[0].content.parts[0].text.trim();
       return { days: parseShelfLifeDays(text), llm_used: true };
+    }
+    else if (options.llm_provider === 'ai_task') {
+      const responseText = await generateAiTaskData(prompt, options.ai_task_entity_id);
+      if (responseText) {
+        return { days: parseShelfLifeDays(responseText), llm_used: true };
+      }
+      // No data back — usually means no AI Task entity is set up in HA.
+      log.warning('ai_task provider selected but Home Assistant returned no data. Is an AI Task entity configured (Settings > Voice assistants > AI Task)?');
     }
     else if (options.llm_provider === 'ha_conversation') {
       const responseText = await processConversation(prompt, options.ha_agent_id);

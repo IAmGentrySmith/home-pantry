@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0
+
+### Added
+- Companion **dashboard scan card** (`lovelace/home-pantry-card.js`): a custom
+  Lovelace card that opens the Home Assistant Companion app's **native** barcode
+  scanner and sends each code to Home Pantry via a `rest_command`. This is how to
+  get true native scanning on a phone — the add-on's own UI runs in an ingress
+  iframe and can't reach the native scanner. Ships with a sample
+  `lovelace/pantry-dashboard.yaml` and setup steps in the README (Step 6). The
+  card is copied into `<config>/www/`; the add-on container is unchanged.
+
+### Fixed
+- Photo barcode scanning now reads 1D retail barcodes (UPC/EAN) from phone
+  photos far more reliably. A linear barcode is often too small in a full-
+  resolution photo for ZXing's single-shot decode, so the scanner now restricts
+  to retail symbologies and retries on progressively tighter centre crops of the
+  image. The failure message also points to manual **+ Add** as a fallback.
+
 ## 1.3.0
 
 ### Added

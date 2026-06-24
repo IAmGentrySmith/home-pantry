@@ -159,6 +159,44 @@ Save the automation, and you will never let food expire again!
 
 ---
 
+## Step 6: Native barcode scanner on a dashboard (optional)
+
+The add-on's built-in scanner uses your browser's camera, which needs a secure (HTTPS) connection — over a local `http://` link (common in the mobile app) the live camera is blocked. The **Home Assistant Companion app has its own native scanner**, but it is only reachable from the main HA frontend, not from inside the add-on's panel (which runs in an ingress iframe). This optional **dashboard card** bridges the gap: it opens the native scanner and sends each barcode straight to Home Pantry. It works **inside the Companion app** (iOS/Android); in a desktop browser the button is disabled (there is no native scanner there).
+
+**Prerequisite — the add-on's direct API (same as Step 4):** set `api_token`, publish port `8099/tcp`, and restart the add-on. If you already set up Voice control, you're done.
+
+**1. Add a `rest_command`** to your `configuration.yaml`. The card calls this service, and Home Assistant makes the request to the add-on **server-side**, so there is no browser HTTPS/CORS issue:
+
+```yaml
+rest_command:
+  pantry_scan:
+    url: "http://homeassistant.local:8099/api/scan"
+    method: post
+    payload: '{"upc": "{{ upc }}"}'
+    content_type: 'application/json'
+    headers:
+      Authorization: "Bearer YOUR_API_TOKEN"
+```
+
+Replace `YOUR_API_TOKEN` with your `api_token` (and `homeassistant.local` with your HA host if it doesn't resolve). **Restart Home Assistant** to load it.
+
+**2. Install the card:**
+1. Copy [`home_pantry/lovelace/home-pantry-card.js`](home_pantry/lovelace/home-pantry-card.js) from this repo into your Home Assistant config folder under `www/` — i.e. `<config>/www/home-pantry-card.js`. Create the `www` folder if it doesn't exist.
+2. Go to **Settings > Dashboards**, open the **⋮** menu (top right) → **Resources** *(enable **Advanced Mode** in your user profile if you don't see it)*, click **+ Add Resource**, set the **URL** to `/local/home-pantry-card.js` and **Resource type** to **JavaScript Module**, then **Create**. Refresh the page.
+
+**3. Add the card** to any dashboard (edit dashboard → **+ Add Card** → search "Home Pantry Scan", or paste YAML):
+
+```yaml
+type: custom:home-pantry-scan-card
+title: Scan to Pantry
+```
+
+A ready-made full view (scan card + expiring sensor + link to the app) is in [`home_pantry/lovelace/pantry-dashboard.yaml`](home_pantry/lovelace/pantry-dashboard.yaml).
+
+**Using it:** open the dashboard in the Companion app and tap **Scan barcode**. The native scanner opens; scan one or more items, then tap **Done**. Each barcode is sent to Home Pantry — products found in Open Food Facts (or already in your pantry) are added automatically. **Unknown barcodes are not auto-added**; open the full **Home Pantry** app from the sidebar and use **+ Add** to enter those by name.
+
+---
+
 ## Maintenance & Troubleshooting
 
 **Your data lives on the Add-on's private `/data` volume** (`pantry.sqlite`), which survives Add-on restarts and updates.

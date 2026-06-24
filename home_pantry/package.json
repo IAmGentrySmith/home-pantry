@@ -1,6 +1,6 @@
 {
   "name": "home-pantry",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Home Assistant Pantry Add-on",
   "main": "server.js",
   "type": "module",

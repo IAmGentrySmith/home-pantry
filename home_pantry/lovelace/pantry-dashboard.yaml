@@ -1,0 +1,44 @@
+# Sample "Pantry" dashboard view for Home Pantry.
+#
+# Add it under Settings > Dashboards (edit a dashboard > Raw configuration
+# editor), or merge the `cards:` into an existing view. Requires the
+# home-pantry-card.js resource (see the README, "Native barcode scanner on a
+# dashboard") and the rest_command below.
+#
+# rest_command (configuration.yaml) — reuses the add-on's direct API
+# (open port 8099 + api_token, same as the Voice Assistant setup):
+#
+#   rest_command:
+#     pantry_scan:
+#       url: "http://homeassistant.local:8099/api/scan"
+#       method: post
+#       payload: '{"upc": "{{ upc }}"}'
+#       content_type: 'application/json'
+#       headers:
+#         Authorization: "Bearer YOUR_API_TOKEN"
+
+title: Pantry
+path: pantry
+icon: mdi:basket
+cards:
+  - type: custom:home-pantry-scan-card
+    title: Scan to Pantry
+    # Optional overrides (defaults shown):
+    # service: rest_command.pantry_scan
+    # data_key: upc
+    # scan_title: Scan a barcode
+    # scan_description: Point the camera at a product barcode
+    # cancel_label: Done
+
+  - type: entities
+    title: Pantry status
+    entities:
+      - entity: sensor.pantry_expiring_items
+        name: Expiring within 7 days
+
+  - type: markdown
+    content: >
+      Use the **Home Pantry** entry in your sidebar to open the full app — edit
+      products, set expirations, consume/discard items, mark items "don't
+      restock", and manage inventory. This dashboard is for quick scanning and
+      at-a-glance status.

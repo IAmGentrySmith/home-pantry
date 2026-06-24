@@ -525,6 +525,93 @@ document.body.appendChild(photoInput);
 
 btnPhotoScan.addEventListener('click', () => photoInput.click());
 
+// Restricting to the retail symbologies we actually care about makes ZXing
+// focus instead of trying every format — it measurably improves 1D reads.
+function retailFormats() {
+  if (typeof Html5QrcodeSupportedFormats === 'undefined') return undefined;
+  const F = Html5QrcodeSupportedFormats;
+  return [F.UPC_A, F.UPC_E, F.EAN_13, F.EAN_8, F.CODE_128, F.QR_CODE];
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve({ img, url });
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not load image')); };
+    img.src = url;
+  });
+}
+
+// Center-crop + downscale to a File. Barcodes are wide and users centre them,
+// so a central band makes the code large relative to ZXing's scan lines.
+// scanFile() requires a File (not a bare Blob), so we wrap the canvas output.
+function cropToFile(img, fracW, fracH, maxW) {
+  return new Promise((resolve) => {
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return resolve(null);
+    const sw = Math.round(iw * fracW);
+    const sh = Math.round(ih * fracH);
+    const sx = Math.round((iw - sw) / 2);
+    const sy = Math.round((ih - sh) / 2);
+    const scale = Math.min(1, maxW / sw); // never upscale
+    const dw = Math.max(1, Math.round(sw * scale));
+    const dh = Math.max(1, Math.round(sh * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = dw;
+    canvas.height = dh;
+    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+    canvas.toBlob(
+      (blob) => resolve(blob ? new File([blob], 'crop.png', { type: 'image/png' }) : null),
+      'image/png'
+    );
+  });
+}
+
+// A linear barcode is often too small in a full-resolution phone photo for a
+// single-shot decode. Try progressively tighter centre crops first (best for
+// 1D), then the original image last (covers QR / already-tight shots). First
+// successful decode wins.
+async function buildScanCandidates(file) {
+  const processed = [];
+  try {
+    const { img, url } = await loadImageFromFile(file);
+    const crops = [[0.85, 0.55, 1600], [0.6, 0.4, 1280], [1.0, 1.0, 1600]];
+    for (const [fw, fh, maxW] of crops) {
+      const f = await cropToFile(img, fw, fh, maxW);
+      if (f) processed.push(f);
+    }
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    // Couldn't process the image — fall back to the original file alone.
+  }
+  return [...processed, file];
+}
+
+async function decodeBarcodeFromFile(file) {
+  const formats = retailFormats();
+  const config = {
+    verbose: false,
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true }, // native decoder on Android/desktop; no-op on iOS
+  };
+  if (formats) config.formatsToSupport = formats;
+
+  for (const candidate of await buildScanCandidates(file)) {
+    let reader;
+    try {
+      reader = new Html5Qrcode('reader', config);
+      const decoded = await reader.scanFile(candidate, /* showImage */ false);
+      if (decoded) return decoded;
+    } catch (err) {
+      // This candidate didn't decode; try the next.
+    } finally {
+      if (reader) { try { await reader.clear(); } catch (e) { /* nothing to clear */ } }
+    }
+  }
+  return null;
+}
+
 photoInput.addEventListener('change', async () => {
   const file = photoInput.files && photoInput.files[0];
   photoInput.value = ''; // reset so the same photo can be picked again later
@@ -536,21 +623,17 @@ photoInput.addEventListener('change', async () => {
 
   await teardownScanner(); // release the live reader if it was running
   const toast = showToast('Decoding barcode from photo…');
-  let reader;
   try {
-    reader = new Html5Qrcode('reader', /* verbose */ false);
-    const decodedText = await reader.scanFile(file, /* showImage */ false);
-    try { await reader.clear(); } catch (err) { /* nothing rendered to clear */ }
-    reader = null;
+    const decodedText = await decodeBarcodeFromFile(file);
     removeToast(toast);
-    await onScanSuccess(decodedText);
+    if (decodedText) {
+      await onScanSuccess(decodedText);
+    } else {
+      showToast('No barcode found. Get closer so the barcode fills the frame, keep it level and in focus, then retry — or use “+ Add” to enter it by hand.', 6000);
+    }
   } catch (err) {
     removeToast(toast);
-    showToast('No barcode found in that photo. Center the barcode, keep it in focus, and try again.', 4000);
-  } finally {
-    if (reader) {
-      try { await reader.clear(); } catch (err) { /* nothing rendered to clear */ }
-    }
+    showToast('Could not read that photo. Try again, or use “+ Add” to enter the item by hand.', 5000);
   }
 });
 

@@ -58,6 +58,11 @@ header .actions {
 header .actions .secondary-btn {
   width: auto;
 }
+header .actions .icon-btn {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+}
 
 h1, h2 {
   margin: 0;
@@ -363,6 +368,22 @@ input, select {
 .dialog-field-check input {
   width: auto;
   flex: none;
+}
+/* API token generator row: monospace token field + inline Copy button. */
+.token-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.token-row .token-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+.token-row .secondary-btn {
+  width: auto;
 }
 .dialog-actions {
   display: flex;

@@ -53,7 +53,7 @@ endpoints `POST /api/add_by_name` and `POST /api/consume_by_name`. Because a
 `rest_command` calls the add-on directly (not via the authenticated ingress UI),
 you must:
 
-1. Set `api_token` to a long random string and **Save**.
+1. Set `api_token` and **Save** — click the **key icon** in the Home Pantry app to generate a strong token.
 2. In the add-on **Network** section, publish port `8099/tcp` and **Save**
    (it ships closed). **Restart** the add-on.
 3. Add `rest_command`s in Home Assistant pointing at

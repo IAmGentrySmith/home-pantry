@@ -40,8 +40,9 @@ configuration:
     name: Voice API token
     description: >-
       Advanced and optional. Bearer token protecting the direct API used by the
-      optional Voice Assistant REST commands (see the documentation). Leave
-      blank unless you enable the network port for voice control.
+      optional Voice Assistant REST commands and the dashboard scan card (see the
+      documentation). Tip: open the Home Pantry app and click the key icon in the
+      top bar to generate one. Leave blank unless you enable the network port.
   log_level:
     name: Log level
     description: >-

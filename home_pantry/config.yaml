@@ -1,6 +1,6 @@
 name: "Home Pantry"
 description: "Kitchen Grocery and Pantry Inventory Management with LLM Expiration Dates and Todo Sync."
-version: "1.4.0"
+version: "1.5.0"
 slug: "home_pantry"
 arch:
   - aarch64
@@ -24,7 +24,7 @@ panel_admin: false
 ports:
   8099/tcp: null
 ports_description:
-  8099/tcp: "Only needed for the optional Voice Assistant REST commands (README Step 4). Leave disabled otherwise. When enabled, direct access requires the api_token option to be set."
+  8099/tcp: "Optional direct API for the Voice Assistant commands and the dashboard scan card (README Steps 4 & 6). Leave the box blank to keep it disabled; type 8099 in the box to publish it, then also set the api_token option. To disable it again later, clear the box and Save. The 8099/tcp label on the right is the add-on's fixed internal port, not something you enter."
 # The database now lives on the private /data volume (always mapped, no entry
 # needed). /share is mapped READ-ONLY only so the one-time migration can copy a
 # database left behind by older versions that stored it under /share/home_pantry.

@@ -102,7 +102,7 @@ You can allow your Home Assistant Voice Assistant (like OpenAI ChatGPT or Assist
 Because voice assistants usually just give you text (like "Milk") instead of barcodes, the Add-on has special "fuzzy-matching" API endpoints. Reaching them needs two one-time setup steps: unlike the web UI (which goes through the authenticated ingress panel), a `rest_command` calls the Add-on *directly*, so the Add-on's network port must be opened and protected with a token.
 
 **1. Open the port and set an API token**
-1. On the Add-on page, open the **Configuration** tab and set **`api_token`** to a long random string of your choosing (this acts as the password for the direct API). Click **Save**.
+1. On the Add-on page, open the **Configuration** tab and set **`api_token`** (this acts as the password for the direct API). Need a value? Open the Home Pantry app and click the **key icon** in the top bar to generate a strong token, then paste it here. Click **Save**.
 2. Open the **Network** section (the **Network** tab, or the Network panel within the Configuration tab), set the host port for `8099/tcp` to **`8099`**, and click **Save**. *(It ships disabled, so the API is never exposed on your network without a token.)*
 3. Go to the **Info** tab and click **Restart** so both changes take effect.
 
@@ -163,7 +163,7 @@ Save the automation, and you will never let food expire again!
 
 The add-on's built-in scanner uses your browser's camera, which needs a secure (HTTPS) connection — over a local `http://` link (common in the mobile app) the live camera is blocked. The **Home Assistant Companion app has its own native scanner**, but it is only reachable from the main HA frontend, not from inside the add-on's panel (which runs in an ingress iframe). This optional **dashboard card** bridges the gap: it opens the native scanner and sends each barcode straight to Home Pantry. It works **inside the Companion app** (iOS/Android); in a desktop browser the button is disabled (there is no native scanner there).
 
-**Prerequisite — the add-on's direct API (same as Step 4):** set `api_token`, publish port `8099/tcp`, and restart the add-on. If you already set up Voice control, you're done.
+**Prerequisite — the add-on's direct API (same as Step 4):** set `api_token` (generate one with the **key icon** in the Home Pantry app), publish port `8099/tcp`, and restart the add-on. If you already set up Voice control, you're done.
 
 **1. Add a `rest_command`** to your `configuration.yaml`. The card calls this service, and Home Assistant makes the request to the add-on **server-side**, so there is no browser HTTPS/CORS issue:
 

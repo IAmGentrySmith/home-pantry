@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.0
+
+### Added
+- "Generate API token" button — the key icon in the app's top bar creates a
+  strong random token to paste into the add-on's **Voice API token** option, so
+  you no longer have to invent one. (Home Assistant renders the Configuration
+  page, so the button lives in the app; you still paste it there, Save, and
+  Restart.)
+
+### Changed
+- Clearer **Network** port help text: the box is the host port (type 8099 to
+  enable, clear it and Save to disable), and "8099/tcp" is the add-on's fixed
+  internal port. (The Network card is rendered by Home Assistant; the add-on
+  can't restyle the input or the "show disabled ports" toggle.)
+
 ## 1.4.0
 
 ### Added

@@ -134,6 +134,83 @@ async function showConfirm({ title, message, confirmText = 'OK', cancelText = 'C
   return result !== null;
 }
 
+// --- API token generator ---
+// Home Assistant renders the add-on Configuration page, so we can't add a button
+// there. Instead we generate the token here; the user copies it into
+// Configuration > "Voice API token". crypto.getRandomValues works without a
+// secure context (unlike crypto.subtle / navigator.clipboard).
+function generateApiToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function copyFromInput(input) {
+  input.focus();
+  input.select();
+  try { input.setSelectionRange(0, input.value.length); } catch (e) { /* not selectable */ }
+  try {
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(input.value);
+      return true;
+    }
+  } catch (e) { /* fall through to execCommand */ }
+  try { if (document.execCommand('copy')) return true; } catch (e) { /* unsupported */ }
+  return false; // text is left selected; user copies manually
+}
+
+function showApiTokenDialog() {
+  formDialog.innerHTML = '';
+  const form = document.createElement('form');
+  form.method = 'dialog'; // the "Close" submit button closes the native <dialog>
+
+  form.appendChild(el('h2', 'API token', 'dialog-title'));
+  form.appendChild(el('p',
+    'Protects the optional direct API used by the Voice Assistant commands and the dashboard scan card. ' +
+    'Copy this token into the add-on’s Configuration → “Voice API token”, then Save and Restart the add-on. ' +
+    'If you change it later, update your rest_commands to match.',
+    'dialog-message'));
+
+  const row = el('div', null, 'token-row');
+  const input = document.createElement('input');
+  input.className = 'dialog-input token-input';
+  input.readOnly = true;
+  input.value = generateApiToken();
+  input.setAttribute('aria-label', 'Generated API token');
+  const copyBtn = el('button', 'Copy', 'secondary-btn');
+  copyBtn.type = 'button';
+  row.appendChild(input);
+  row.appendChild(copyBtn);
+  form.appendChild(row);
+
+  const status = el('div', '', 'dialog-label');
+  form.appendChild(status);
+
+  const actions = el('div', null, 'dialog-actions');
+  const regenBtn = el('button', 'Regenerate', 'secondary-btn');
+  regenBtn.type = 'button';
+  const closeBtn = el('button', 'Close', 'primary-btn');
+  closeBtn.type = 'submit';
+  actions.appendChild(regenBtn);
+  actions.appendChild(closeBtn);
+  form.appendChild(actions);
+
+  copyBtn.addEventListener('click', async () => {
+    status.textContent = (await copyFromInput(input))
+      ? 'Copied to clipboard.'
+      : 'Selected — press Ctrl/Cmd+C (or long-press) to copy.';
+  });
+  regenBtn.addEventListener('click', () => {
+    input.value = generateApiToken();
+    status.textContent = 'New token generated.';
+  });
+
+  formDialog.appendChild(form);
+  formDialog.showModal();
+  input.focus();
+  input.select();
+}
+
 // --- Data Loading ---
 
 async function loadInventory() {
@@ -709,6 +786,7 @@ function onScanFailure(error) {
 }
 
 // --- Event Listeners ---
+document.getElementById('btn-api-token').addEventListener('click', showApiTokenDialog);
 document.getElementById('btn-add').addEventListener('click', addManual);
 document.getElementById('search').addEventListener('input', renderInventory);
 document.getElementById('sort').addEventListener('change', renderInventory);

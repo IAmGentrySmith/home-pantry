@@ -5,8 +5,9 @@ A lightweight, fully local Home Assistant Add-on to manage your kitchen grocery 
 ## Features
 - **Barcode Scanning**: Built-in HTML5 camera scanner designed perfectly for the iOS/Android Companion Apps.
 - **Smart Data Entry**: Automatically queries the Open Food Facts API to identify products based on their UPC barcode.
+- **Manual Entry**: Add items without a barcode (name, category, optional expiration) — handy for produce, the deli counter, or anything that won't scan.
 - **LLM Expiration Dates**: Optionally uses a Home Assistant AI Task or Conversation agent (Anthropic/Claude, OpenAI, Google, Ollama — whatever you've set up), or a direct OpenAI / Google Gemini key, to intelligently estimate shelf-life based on the product name and category!
-- **Shopping List Sync**: When you click "Consume" on an item, it is automatically added to your native Home Assistant To-do list for your next grocery trip.
+- **Shopping List Sync**: When you click "Consume" on an item, it is automatically added to your native Home Assistant To-do list for your next grocery trip — unless you've marked that product "don't restock" (great for one-off perishables like fresh salmon, or items you won't rebuy).
 - **Voice Assistant Ready**: Speak to your Home Assistant to add or consume items!
 - **Automations**: Automatically tracks expiring food and emits a `sensor.pantry_expiring_items` entity so you can build HA Automations to notify you when food is going bad.
 

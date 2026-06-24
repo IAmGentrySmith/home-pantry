@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.0
+
+### Added
+- Dark mode: the web UI now follows your device / Home Assistant light–dark
+  preference (`prefers-color-scheme`) instead of always rendering light.
+- Photo barcode scanning ("Scan a Photo Instead"): decodes a barcode from a
+  still photo, which works in the iOS/Android Companion app over a local
+  `http://` connection where the live camera is blocked (browsers only allow
+  camera access in a secure HTTPS context).
+- Manual entry: an **+ Add** button to add a pantry item without scanning a
+  barcode (name, category, optional expiration date).
+- Per-product "don't restock" preference: mark items that should never be added
+  to the shopping list when used up — e.g. one-off perishables like fresh fish,
+  or things you won't rebuy. Set it when adding manually or via **Edit**;
+  consuming such an item (button or voice) then skips the shopping list.
+
+### Changed
+- Replaced the non-functional "Use HA Native Scanner" button (it only showed a
+  hint) with the working photo scanner, plus an in-modal note explaining the
+  HTTPS requirement for live camera scanning.
+
 ## 1.2.0
 
 ### Added

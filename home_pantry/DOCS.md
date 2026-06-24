@@ -25,16 +25,25 @@ Options are read at start-up — **restart the add-on after changing them**.
 
 ## Using the app
 
-Open the UI from the sidebar (or **Open Web UI** on the add-on page).
+Open the UI from the sidebar (or **Open Web UI** on the add-on page). The UI
+follows your device's light/dark appearance.
 
+- **+ Add** adds an item **without** scanning — enter a name, category, and an
+  optional expiration date. Handy for produce, the deli counter, or anything
+  that won't scan.
 - **Scan** adds an item by camera barcode. Unknown barcodes prompt for a name and
-  category. Allow camera access when asked (works over the HA UI / Companion App).
-- **Edit** changes a product's name, category, and default shelf life
-  (use `0` for non-perishable — no expiration is set).
+  category. The live camera needs a secure (HTTPS) connection; over a local
+  `http://` link (common in the mobile app) use **Scan a Photo Instead** in the
+  scanner, which decodes a still photo of the barcode.
+- **Edit** changes a product's name, category, default shelf life (use `0` for
+  non-perishable — no expiration is set), and whether it's **restocked** (added
+  to the shopping list) when used up.
 - **Set Exp** picks an inventory item's expiration date (or clears it).
 - **Merge** transfers this product's inventory onto another UPC and makes this
   barcode an alias of it (handy when the same product has two barcodes).
-- **Consume** marks an item used **and** adds it to your shopping list.
+- **Consume** marks an item used **and** adds it to your shopping list — unless
+  the product is marked "don't restock" (e.g. fresh fish, or something you won't
+  rebuy), in which case it's left off the list.
 - **Discard** marks an item used **without** touching the shopping list.
 
 ## Voice control (optional)

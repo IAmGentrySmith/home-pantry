@@ -1,6 +1,6 @@
 name: "Home Pantry"
 description: "Kitchen Grocery and Pantry Inventory Management with LLM Expiration Dates and Todo Sync."
-version: "1.2.0"
+version: "1.3.0"
 slug: "home_pantry"
 arch:
   - aarch64

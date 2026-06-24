@@ -1,11 +1,14 @@
 /*
  * Home Pantry — Styles
  *
- * CSS custom properties inherit from Home Assistant's theme system.
- * When running inside HA's ingress iframe, HA injects its own --primary-color etc.
- * The fallback values here are used when running standalone (e.g., development).
+ * Colors are driven by CSS custom properties. Home Assistant does NOT inject its
+ * theme into an add-on's ingress iframe, so we follow the OS / Companion-app
+ * appearance with `prefers-color-scheme` — light defaults below, dark overrides
+ * in the media query. The `var(--ha-*, fallback)` indirection is kept so the rare
+ * setup that does expose HA theme vars still wins; otherwise our fallbacks apply.
  */
 :root {
+  color-scheme: light dark;
   --hp-primary-color: var(--primary-color, #03a9f4);
   --hp-card-bg: var(--card-background-color, #ffffff);
   --hp-text-primary: var(--primary-text-color, #212121);
@@ -15,6 +18,16 @@
   --hp-error: var(--error-color, #f44336);
   --hp-warning: var(--warning-color, #ff9800);
   --hp-success: #4caf50;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hp-card-bg: var(--card-background-color, #1e1e1e);
+    --hp-text-primary: var(--primary-text-color, #e1e1e1);
+    --hp-text-secondary: var(--secondary-text-color, #9e9e9e);
+    --hp-divider: var(--divider-color, #3a3a3a);
+    --hp-background: var(--primary-background-color, #121212);
+  }
 }
 
 body {
@@ -34,6 +47,16 @@ header {
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+header .actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+/* The secondary button is full-width inside modals; keep it compact in the header. */
+header .actions .secondary-btn {
+  width: auto;
 }
 
 h1, h2 {
@@ -139,6 +162,12 @@ input, select {
 
 .item-meta {
   font-size: 12px;
+  color: var(--hp-text-secondary);
+}
+
+.item-flag {
+  font-size: 12px;
+  font-style: italic;
   color: var(--hp-text-secondary);
 }
 
@@ -267,6 +296,19 @@ input, select {
   padding: 16px;
 }
 
+.scanner-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--hp-text-secondary);
+}
+.scanner-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--hp-divider);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
 /* Dialogs (native <dialog>) */
 .dialog {
   border: none;
@@ -307,6 +349,19 @@ input, select {
 .dialog-input {
   width: 100%;
   box-sizing: border-box;
+  flex: none;
+}
+/* Checkbox field: lay the box and its label out on one row. */
+.dialog-field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.dialog-field-check .dialog-label {
+  margin: 0;
+}
+.dialog-field-check input {
+  width: auto;
   flex: none;
 }
 .dialog-actions {

@@ -84,7 +84,7 @@ function tooLong(...values) {
 // 1. Get all inventory
 app.get('/api/inventory', asyncHandler(async (req, res) => {
   const items = await query(`
-    SELECT i.id, i.upc, i.added_date, i.expiration_date, p.name, p.category, p.default_expiration_days
+    SELECT i.id, i.upc, i.added_date, i.expiration_date, p.name, p.category, p.default_expiration_days, p.restock
     FROM inventory i
     JOIN products p ON i.upc = p.upc
     WHERE i.consumed = 0
@@ -178,6 +178,48 @@ app.post('/api/scan_custom', asyncHandler(async (req, res) => {
   res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used: prod.llm_used ?? false });
 }));
 
+// 2d. Add an item manually (no barcode scan)
+app.post('/api/add_manual', asyncHandler(async (req, res) => {
+  const { name, category, expiration_date, restock } = req.body;
+  const trimmedName = (name || '').trim();
+  if (!trimmedName) return res.status(400).json({ error: "Missing name" });
+  if (tooLong(trimmedName, category)) return res.status(400).json({ error: `Name and category must be ${MAX_TEXT_LEN} characters or fewer.` });
+  if (expiration_date != null && expiration_date !== '' && !isValidCalendarDate(expiration_date)) {
+    return res.status(400).json({ error: "Invalid date. Use a real calendar date in YYYY-MM-DD format." });
+  }
+
+  const cat = (category && category.trim()) || "Misc";
+
+  // Reuse an existing product with the same name (case-insensitive) so repeated
+  // manual adds don't pile up duplicate generic products. A reused product keeps
+  // its own restock preference; the flag below only applies when we create one.
+  const existing = await query(`SELECT * FROM products WHERE name = ? COLLATE NOCASE LIMIT 1`, [trimmedName]);
+  let prod;
+  let llm_used = false;
+
+  if (existing.length > 0) {
+    prod = existing[0];
+  } else {
+    const upc = 'generic_' + Date.now();
+    const est = await estimateShelfLife(trimmedName, cat);
+    llm_used = est.llm_used;
+    const restockVal = (restock === 0 || restock === false) ? 0 : 1;
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days, restock, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      [upc, trimmedName, cat, est.days, restockVal, nowIso()]);
+    prod = { upc, name: trimmedName, category: cat, default_expiration_days: est.days };
+  }
+
+  // An explicit date wins; otherwise derive it from the product's shelf life.
+  const expirationDate = (expiration_date && expiration_date.trim())
+    ? expiration_date.trim()
+    : computeExpirationDate(prod.default_expiration_days);
+
+  await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
+    [prod.upc, todayISO(), expirationDate, nowIso()]);
+
+  res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used });
+}));
+
 // 2c. Merge Products
 app.post('/api/merge_products', asyncHandler(async (req, res) => {
   const { source_upc, target_upc } = req.body;
@@ -203,14 +245,19 @@ app.post('/api/merge_products', asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Products merged successfully" });
 }));
 
-// 3. Consume item (marks as consumed AND adds to shopping list)
+// 3. Consume item (marks as consumed; adds to shopping list unless the product
+// is flagged restock = 0 — "don't restock this when it's used up")
 app.post('/api/consume', asyncHandler(async (req, res) => {
   const { id } = req.body;
-  const items = await query(`SELECT p.name FROM inventory i JOIN products p ON i.upc = p.upc WHERE i.id = ?`, [id]);
+  const items = await query(`SELECT p.name, p.restock FROM inventory i JOIN products p ON i.upc = p.upc WHERE i.id = ?`, [id]);
   if (items.length > 0) {
     await run(`UPDATE inventory SET consumed = 1, consumed_at = ? WHERE id = ?`, [nowIso(), id]);
-    await addItemsToShoppingList(items[0].name);
-    res.json({ success: true, message: `Consumed ${items[0].name} and added to shopping list.` });
+    if (items[0].restock !== 0) {
+      await addItemsToShoppingList(items[0].name);
+      res.json({ success: true, message: `Consumed ${items[0].name} and added to shopping list.` });
+    } else {
+      res.json({ success: true, message: `Consumed ${items[0].name}. Not restocked — left off the shopping list.` });
+    }
   } else {
     res.status(404).json({ error: "Item not found" });
   }
@@ -231,7 +278,7 @@ app.post('/api/discard', asyncHandler(async (req, res) => {
 // 4. Update Product (partial update — only updates fields that are provided)
 app.put('/api/products/:upc', asyncHandler(async (req, res) => {
   const { upc } = req.params;
-  const { name, category, default_expiration_days } = req.body;
+  const { name, category, default_expiration_days, restock } = req.body;
 
   if (tooLong(name, category)) return res.status(400).json({ error: `Name and category must be ${MAX_TEXT_LEN} characters or fewer.` });
 
@@ -245,9 +292,10 @@ app.put('/api/products/:upc', asyncHandler(async (req, res) => {
   const updatedName = name !== undefined ? name : current.name;
   const updatedCategory = category !== undefined ? category : current.category;
   const updatedDays = default_expiration_days !== undefined ? default_expiration_days : current.default_expiration_days;
+  const updatedRestock = restock !== undefined ? (restock ? 1 : 0) : current.restock;
 
-  await run(`UPDATE products SET name = ?, category = ?, default_expiration_days = ? WHERE upc = ?`, 
-    [updatedName, updatedCategory, updatedDays, upc]);
+  await run(`UPDATE products SET name = ?, category = ?, default_expiration_days = ?, restock = ? WHERE upc = ?`,
+    [updatedName, updatedCategory, updatedDays, updatedRestock, upc]);
   res.json({ success: true });
 }));
 
@@ -280,17 +328,21 @@ app.post('/api/consume_by_name', asyncHandler(async (req, res) => {
 
   const escaped = escapeLike(name);
   const items = await query(`
-    SELECT i.id, p.name 
-    FROM inventory i 
-    JOIN products p ON i.upc = p.upc 
+    SELECT i.id, p.name, p.restock
+    FROM inventory i
+    JOIN products p ON i.upc = p.upc
     WHERE i.consumed = 0 AND p.name LIKE ? ESCAPE '\\'
     ORDER BY i.expiration_date ASC LIMIT 1
   `, [`%${escaped}%`]);
 
   if (items.length > 0) {
     await run(`UPDATE inventory SET consumed = 1, consumed_at = ? WHERE id = ?`, [nowIso(), items[0].id]);
-    await addItemsToShoppingList(items[0].name);
-    res.json({ success: true, message: `Consumed ${items[0].name}` });
+    if (items[0].restock !== 0) {
+      await addItemsToShoppingList(items[0].name);
+      res.json({ success: true, message: `Consumed ${items[0].name}` });
+    } else {
+      res.json({ success: true, message: `Consumed ${items[0].name} (not restocked)` });
+    }
   } else {
     res.status(404).json({ error: "No matching item found in inventory." });
   }

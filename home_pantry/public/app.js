@@ -59,14 +59,28 @@ function showDialog({ title, message = '', fields = [], submitText = 'Save', can
 
     const inputs = [];
     fields.forEach((f, i) => {
-      const wrap = el('div', null, 'dialog-field');
       const id = `dlg-field-${i}`;
-      const label = el('label', f.label, 'dialog-label');
-      label.htmlFor = id;
       const input = document.createElement('input');
       input.id = id;
       input.name = f.name;
       input.type = f.type || 'text';
+
+      if (f.type === 'checkbox') {
+        // Checkbox sits inline with its label and returns a boolean on submit.
+        input.checked = !!f.value;
+        const wrap = el('div', null, 'dialog-field dialog-field-check');
+        const label = el('label', f.label, 'dialog-label');
+        label.htmlFor = id;
+        wrap.appendChild(input);
+        wrap.appendChild(label);
+        form.appendChild(wrap);
+        inputs.push(input);
+        return;
+      }
+
+      const wrap = el('div', null, 'dialog-field');
+      const label = el('label', f.label, 'dialog-label');
+      label.htmlFor = id;
       if (f.value != null) input.value = f.value;
       if (f.placeholder) input.placeholder = f.placeholder;
       if (f.required) input.required = true;
@@ -101,7 +115,9 @@ function showDialog({ title, message = '', fields = [], submitText = 'Save', can
     form.addEventListener('submit', (e) => {
       e.preventDefault(); // native required-field validation still runs first
       const values = {};
-      inputs.forEach((inp) => { values[inp.name] = inp.value; });
+      inputs.forEach((inp) => {
+        values[inp.name] = inp.type === 'checkbox' ? inp.checked : inp.value;
+      });
       finish(values);
     });
     formDialog.addEventListener('close', onClose);
@@ -175,12 +191,17 @@ function renderInventory() {
     const expStr = item.expiration_date ? `Exp: ${item.expiration_date}` : 'No expiration';
     info.appendChild(el('span', `${item.category || 'Uncategorized'} • ${expStr}`, 'item-meta'));
 
+    // Surface the "don't restock" preference so it's visible at a glance.
+    if (item.restock === 0) {
+      info.appendChild(el('span', 'Not restocked when used up', 'item-flag'));
+    }
+
     // Actions section
     const actions = document.createElement('div');
     actions.className = 'item-actions';
 
     const editBtn = el('button', 'Edit');
-    editBtn.addEventListener('click', () => editProduct(item.upc, item.name, item.category || '', item.default_expiration_days));
+    editBtn.addEventListener('click', () => editProduct(item.upc, item.name, item.category || '', item.default_expiration_days, item.restock));
     actions.appendChild(editBtn);
 
     const expBtn = el('button', 'Set Exp');
@@ -272,9 +293,13 @@ function renderExpiring() {
 // --- Actions ---
 
 async function consumeItem(id) {
+  const item = inventory.find(i => i.id === id);
+  const noRestock = item && item.restock === 0;
   if (!(await showConfirm({
     title: 'Consume item',
-    message: 'Consume this item and add it to your shopping list?',
+    message: noRestock
+      ? 'Consume this item? It’s marked “not restocked”, so it will NOT be added to your shopping list.'
+      : 'Consume this item and add it to your shopping list?',
     confirmText: 'Consume',
   }))) return;
   try {
@@ -314,19 +339,20 @@ async function discardItem(id) {
   }
 }
 
-async function editProduct(upc, oldName, oldCategory, oldDays) {
+async function editProduct(upc, oldName, oldCategory, oldDays, oldRestock) {
   const result = await showDialog({
     title: 'Edit product',
     fields: [
       { name: 'name', label: 'Product name', type: 'text', value: oldName, required: true },
       { name: 'category', label: 'Category', type: 'text', value: oldCategory },
       { name: 'days', label: 'Default shelf life (days, 0 = non-perishable)', type: 'number', min: 0, value: oldDays != null ? String(oldDays) : '14' },
+      { name: 'restock', label: 'Add to shopping list when used up', type: 'checkbox', value: oldRestock !== 0 },
     ],
     submitText: 'Save',
   });
   if (!result) return; // cancelled
 
-  const body = { name: result.name || oldName, category: result.category || oldCategory };
+  const body = { name: result.name || oldName, category: result.category || oldCategory, restock: result.restock ? 1 : 0 };
   const parsedDays = parseInt(result.days, 10);
   if (!isNaN(parsedDays)) {
     body.default_expiration_days = parsedDays;
@@ -409,12 +435,53 @@ async function mergeProduct(sourceUpc) {
   }
 }
 
+async function addManual() {
+  const result = await showDialog({
+    title: 'Add item manually',
+    message: 'Add an item without scanning a barcode.',
+    fields: [
+      { name: 'name', label: 'Item name', type: 'text', required: true, placeholder: 'e.g. Salmon fillet' },
+      { name: 'category', label: 'Category', type: 'text', value: 'Misc' },
+      { name: 'expiration', label: 'Expiration date (optional — blank lets the estimator decide)', type: 'date' },
+      { name: 'restock', label: 'Add to shopping list when used up', type: 'checkbox', value: true },
+    ],
+    submitText: 'Add',
+  });
+  if (!result) return; // cancelled
+
+  const name = (result.name || '').trim();
+  if (!name) return;
+
+  const toast = showToast('Adding item…');
+  try {
+    const res = await fetch('./api/add_manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        category: (result.category || '').trim() || 'Misc',
+        expiration_date: (result.expiration || '').trim() || null,
+        restock: result.restock ? 1 : 0,
+      }),
+    });
+    const data = await res.json();
+    removeToast(toast);
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+    const expLabel = data.expiration_date || 'N/A';
+    showToast(`Added: ${data.product.name} (Exp: ${expLabel})`, 4000);
+    loadInventory();
+  } catch (err) {
+    removeToast(toast);
+    showToast('Failed to add item: ' + err.message, 4000);
+  }
+}
+
 // --- Scanner ---
 
 const modal = document.getElementById('scanner-modal');
 const btnScan = document.getElementById('btn-scan');
 const btnCloseScanner = document.getElementById('btn-close-scanner');
-const btnHaScanner = document.getElementById('btn-ha-scanner');
+const btnPhotoScan = document.getElementById('btn-photo-scan');
 let html5QrcodeScanner;
 
 // Safely tear down any existing scanner instance. clear() returns a promise,
@@ -445,8 +512,46 @@ btnCloseScanner.addEventListener('click', async () => {
   await teardownScanner();
 });
 
-btnHaScanner.addEventListener('click', () => {
-  showToast("To use the native scanner, configure an HA Action that triggers the 'mobile_app.barcode_scanned' event.", 5000);
+// Photo-based fallback. The live camera (getUserMedia) requires a secure
+// context, which a local http:// Home Assistant — common in the mobile app — is
+// not, so it's blocked there. Decoding a still image with Html5Qrcode.scanFile()
+// uses no camera stream and therefore works regardless. The hidden file input
+// lets iOS/Android offer "Take Photo" or "Photo Library".
+const photoInput = document.createElement('input');
+photoInput.type = 'file';
+photoInput.accept = 'image/*';
+photoInput.hidden = true;
+document.body.appendChild(photoInput);
+
+btnPhotoScan.addEventListener('click', () => photoInput.click());
+
+photoInput.addEventListener('change', async () => {
+  const file = photoInput.files && photoInput.files[0];
+  photoInput.value = ''; // reset so the same photo can be picked again later
+  if (!file) return;
+  if (typeof Html5Qrcode === 'undefined') {
+    showToast('Barcode scanner failed to load. Reload the page and try again.', 4000);
+    return;
+  }
+
+  await teardownScanner(); // release the live reader if it was running
+  const toast = showToast('Decoding barcode from photo…');
+  let reader;
+  try {
+    reader = new Html5Qrcode('reader', /* verbose */ false);
+    const decodedText = await reader.scanFile(file, /* showImage */ false);
+    try { await reader.clear(); } catch (err) { /* nothing rendered to clear */ }
+    reader = null;
+    removeToast(toast);
+    await onScanSuccess(decodedText);
+  } catch (err) {
+    removeToast(toast);
+    showToast('No barcode found in that photo. Center the barcode, keep it in focus, and try again.', 4000);
+  } finally {
+    if (reader) {
+      try { await reader.clear(); } catch (err) { /* nothing rendered to clear */ }
+    }
+  }
 });
 
 async function onScanSuccess(decodedText, decodedResult) {
@@ -521,6 +626,7 @@ function onScanFailure(error) {
 }
 
 // --- Event Listeners ---
+document.getElementById('btn-add').addEventListener('click', addManual);
 document.getElementById('search').addEventListener('input', renderInventory);
 document.getElementById('sort').addEventListener('change', renderInventory);
 

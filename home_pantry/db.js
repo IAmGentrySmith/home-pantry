@@ -104,6 +104,13 @@ const MIGRATIONS = [
   async () => {
     await run(`ALTER TABLE inventory DROP COLUMN quantity`);
   },
+  // v4 -> per-product restock preference. 0 means "do not auto-add to the
+  // shopping list when an item of this product is consumed" — e.g. one-off
+  // perishables you don't continuously stock (fresh fish) or things you didn't
+  // enjoy and won't rebuy. Existing rows default to 1 (restock, as before).
+  async () => {
+    await run(`ALTER TABLE products ADD COLUMN restock INTEGER NOT NULL DEFAULT 1`);
+  },
 ];
 
 export async function initDb() {

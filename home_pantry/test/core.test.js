@@ -149,6 +149,19 @@ describe('Database Operations', () => {
     assert.equal(result[0].default_expiration_days, 14);
   });
 
+  it('products default to restock = 1, and the flag can be set to 0', async () => {
+    // Mirrors /api/consume's check: restock = 0 means "leave off the shopping list".
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`,
+      ['000000000010', 'Pantry Staple', 'Misc', 7]);
+    const staple = await query(`SELECT restock FROM products WHERE upc = ?`, ['000000000010']);
+    assert.equal(staple[0].restock, 1); // new rows default to restock (migration default)
+
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days, restock) VALUES (?, ?, ?, ?, 0)`,
+      ['000000000011', 'Fresh Salmon', 'Seafood', 2]);
+    const salmon = await query(`SELECT restock FROM products WHERE upc = ?`, ['000000000011']);
+    assert.equal(salmon[0].restock, 0); // explicitly flagged "don't restock"
+  });
+
   it('should find expiring items within the next 7 days', async () => {
     await run(
       `INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`,

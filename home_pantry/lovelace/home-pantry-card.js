@@ -28,27 +28,33 @@ const ABORTED_TYPE = 'bar_code/aborted';
 let msgId = 100000;
 
 // Whichever external-bus transport the Companion app injected (one exists per
-// platform; none in a desktop browser).
+// platform; none in a desktop browser). Each transport serializes differently,
+// and this MUST match Home Assistant's own _sendExternal: Android gets a JSON
+// string, but iOS (webkit) gets the RAW object (WKWebView serializes it). A
+// stringified message to iOS is silently dropped — the scanner never opens.
 function busSender() {
   if (window.externalAppV2 && typeof window.externalAppV2.postMessage === 'function') {
-    return (json) => window.externalAppV2.postMessage(json); // Android (v2)
+    // Android (v2): bare message wrapped in an envelope, as a JSON string.
+    return (msg) => window.externalAppV2.postMessage(JSON.stringify({ type: 'externalBus', payload: msg }));
   }
   if (window.externalApp && typeof window.externalApp.externalBus === 'function') {
-    return (json) => window.externalApp.externalBus(json);   // Android (v1)
+    // Android (legacy): bare message, as a JSON string.
+    return (msg) => window.externalApp.externalBus(JSON.stringify(msg));
   }
   if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.externalBus) {
-    return (json) => window.webkit.messageHandlers.externalBus.postMessage(json); // iOS
+    // iOS: the raw object, NOT a JSON string.
+    return (msg) => window.webkit.messageHandlers.externalBus.postMessage(msg);
   }
   return null;
 }
 
-// Send a {id, type, payload} message to the app as a JSON string. Returns false
-// when there's no external bus (i.e. not running inside the Companion app).
+// Send a {id, type, payload} message to the app. Returns false when there's no
+// external bus (i.e. not running inside the Companion app).
 function sendToApp(message) {
   const send = busSender();
   if (!send) return false;
   try {
-    send(JSON.stringify(message));
+    send(message);
     return true;
   } catch (e) {
     return false;

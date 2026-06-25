@@ -176,9 +176,17 @@ rest_command:
     content_type: 'application/json'
     headers:
       Authorization: "Bearer YOUR_API_TOKEN"
+  # Powers the "Consume" button on each scanned item in the card.
+  pantry_consume:
+    url: "http://homeassistant.local:8099/api/consume"
+    method: post
+    payload: '{"id": {{ id }}}'
+    content_type: 'application/json'
+    headers:
+      Authorization: "Bearer YOUR_API_TOKEN"
 ```
 
-Replace `YOUR_API_TOKEN` with your `api_token` (and `homeassistant.local` with your HA host if it doesn't resolve). **Restart Home Assistant** to load it.
+Replace `YOUR_API_TOKEN` with your `api_token` (and `homeassistant.local` with your HA host if it doesn't resolve). **Restart Home Assistant** to load them.
 
 **2. Install the card:**
 1. Copy [`home_pantry/lovelace/home-pantry-card.js`](home_pantry/lovelace/home-pantry-card.js) from this repo into your Home Assistant config folder under `www/` — i.e. `<config>/www/home-pantry-card.js`. Create the `www` folder if it doesn't exist.
@@ -193,7 +201,9 @@ title: Scan to Pantry
 
 A ready-made full view (scan card + expiring sensor + link to the app) is in [`home_pantry/lovelace/pantry-dashboard.yaml`](home_pantry/lovelace/pantry-dashboard.yaml).
 
-**Using it:** open the dashboard in the Companion app and tap **Scan barcode**. The native scanner opens; scan one or more items, then tap **Done**. Each barcode is sent to Home Pantry — products found in Open Food Facts (or already in your pantry) are added automatically. **Unknown barcodes are not auto-added**; open the full **Home Pantry** app from the sidebar and use **+ Add** to enter those by name.
+**Using it:** open the dashboard in the Companion app and tap **Scan barcode**. The native scanner opens; scan one or more items, then tap **Done**. Each barcode is sent to Home Pantry — products found in Open Food Facts (or already in your pantry) are added automatically. After you tap **Done**, the card lists what you scanned this session with a **Consume** button on each, so you can confirm and consume right there. **Unknown barcodes are not auto-added**; open the full **Home Pantry** app from the sidebar and use **+ Add** to enter those by name.
+
+> Scanning a product you already have **refreshes** that item instead of adding a duplicate (one entry per product). The on-card **Consume** button needs the `pantry_consume` rest_command above.
 
 ---
 

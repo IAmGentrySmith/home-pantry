@@ -162,6 +162,38 @@ describe('Database Operations', () => {
     assert.equal(salmon[0].restock, 0); // explicitly flagged "don't restock"
   });
 
+  it('presence model: one active inventory row per product (refresh, not duplicate)', async () => {
+    // Mirrors server.js addOrRefreshInventory: insert if no active row, else refresh.
+    const addOrRefresh = async (upc, exp) => {
+      const active = await query(`SELECT id FROM inventory WHERE upc = ? AND consumed = 0 ORDER BY id DESC LIMIT 1`, [upc]);
+      if (active.length > 0) {
+        await run(`UPDATE inventory SET added_date = ?, expiration_date = ? WHERE id = ?`, ['2026-02-01', exp, active[0].id]);
+        return { id: active[0].id, alreadyInStock: true };
+      }
+      const ins = await run(`INSERT INTO inventory (upc, added_date, expiration_date) VALUES (?, ?, ?)`, [upc, '2026-01-01', exp]);
+      return { id: ins.id, alreadyInStock: false };
+    };
+
+    await run(`INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`,
+      ['000000000020', 'Milk', 'Dairy', 7]);
+
+    const first = await addOrRefresh('000000000020', '2026-01-08');
+    assert.equal(first.alreadyInStock, false);
+
+    const second = await addOrRefresh('000000000020', '2026-01-15');
+    assert.equal(second.alreadyInStock, true);   // re-scan didn't add a duplicate
+    assert.equal(second.id, first.id);            // same row, refreshed
+
+    const active = await query(`SELECT expiration_date FROM inventory WHERE upc = ? AND consumed = 0`, ['000000000020']);
+    assert.equal(active.length, 1);               // still exactly one active row
+    assert.equal(active[0].expiration_date, '2026-01-15'); // refreshed to the latest
+
+    // Once consumed, a new scan adds a fresh row again.
+    await run(`UPDATE inventory SET consumed = 1, consumed_at = ? WHERE id = ?`, [new Date().toISOString(), first.id]);
+    const third = await addOrRefresh('000000000020', '2026-03-01');
+    assert.equal(third.alreadyInStock, false);
+  });
+
   it('should find expiring items within the next 7 days', async () => {
     await run(
       `INSERT INTO products (upc, name, category, default_expiration_days) VALUES (?, ?, ?, ?)`,

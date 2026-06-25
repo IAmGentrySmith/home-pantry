@@ -79,6 +79,28 @@ function tooLong(...values) {
   return values.some((v) => typeof v === 'string' && v.length > MAX_TEXT_LEN);
 }
 
+/**
+ * Presence model: keep at most ONE active (unconsumed) inventory row per product.
+ * If one already exists for `upc`, refresh its dates instead of adding a
+ * duplicate; otherwise insert a new row. Returns { id, alreadyInStock }.
+ */
+async function addOrRefreshInventory(upc, expirationDate) {
+  const active = await query(
+    `SELECT id FROM inventory WHERE upc = ? AND consumed = 0 ORDER BY id DESC LIMIT 1`,
+    [upc]
+  );
+  if (active.length > 0) {
+    await run(`UPDATE inventory SET added_date = ?, expiration_date = ? WHERE id = ?`,
+      [todayISO(), expirationDate, active[0].id]);
+    return { id: active[0].id, alreadyInStock: true };
+  }
+  const ins = await run(
+    `INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
+    [upc, todayISO(), expirationDate, nowIso()]
+  );
+  return { id: ins.id, alreadyInStock: false };
+}
+
 // --- Routes ---
 
 // 1. Get all inventory
@@ -121,28 +143,27 @@ app.post('/api/scan', asyncHandler(async (req, res) => {
     
     const { days, llm_used } = await estimateShelfLife(name, category);
     
-    // Use actualUpc (resolved alias) — not the original scanned UPC
-    await run(`INSERT INTO products (upc, name, category, default_expiration_days, created_at) VALUES (?, ?, ?, ?, ?)`,
+    // INSERT OR IGNORE + re-select: two rapid scans of the same NEW barcode
+    // would otherwise both pass the "doesn't exist" check above and the second
+    // INSERT would throw a UNIQUE constraint error. OR IGNORE makes it idempotent
+    // (use actualUpc — the resolved alias — not the original scanned UPC).
+    await run(`INSERT OR IGNORE INTO products (upc, name, category, default_expiration_days, created_at) VALUES (?, ?, ?, ?, ?)`,
       [actualUpc, name, category, days, nowIso()]);
 
-    product = [{ upc: actualUpc, name, category, default_expiration_days: days }];
+    product = await query(`SELECT * FROM products WHERE upc = ?`, [actualUpc]);
 
     const prod = product[0];
     const expirationDate = computeExpirationDate(prod.default_expiration_days);
+    const inv = await addOrRefreshInventory(prod.upc, expirationDate);
 
-    await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
-      [prod.upc, todayISO(), expirationDate, nowIso()]);
-
-    res.json({ success: true, product: prod, expiration_date: expirationDate, llm_used });
+    res.json({ success: true, product: prod, expiration_date: expirationDate, llm_used, id: inv.id, already_in_stock: inv.alreadyInStock });
   } else {
     // Product already existed — no LLM call ran, so report llm_used: false
     const prod = product[0];
     const expirationDate = computeExpirationDate(prod.default_expiration_days);
+    const inv = await addOrRefreshInventory(prod.upc, expirationDate);
 
-    await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
-      [prod.upc, todayISO(), expirationDate, nowIso()]);
-
-    res.json({ success: true, product: prod, expiration_date: expirationDate, llm_used: false });
+    res.json({ success: true, product: prod, expiration_date: expirationDate, llm_used: false, id: inv.id, already_in_stock: inv.alreadyInStock });
   }
 }));
 
@@ -165,17 +186,18 @@ app.post('/api/scan_custom', asyncHandler(async (req, res) => {
     prod = existing[0]; // no LLM call ran
   } else {
     const { days, llm_used } = await estimateShelfLife(name, category || "Misc");
-    await run(`INSERT INTO products (upc, name, category, default_expiration_days, created_at) VALUES (?, ?, ?, ?, ?)`,
+    // OR IGNORE + re-select so a concurrent insert of the same UPC can't throw a
+    // UNIQUE constraint error (see /api/scan).
+    await run(`INSERT OR IGNORE INTO products (upc, name, category, default_expiration_days, created_at) VALUES (?, ?, ?, ?, ?)`,
       [trimmedUpc, name, category || "Misc", days, nowIso()]);
-    prod = { upc: trimmedUpc, name, category: category || "Misc", default_expiration_days: days, llm_used };
+    const row = (await query(`SELECT * FROM products WHERE upc = ?`, [trimmedUpc]))[0];
+    prod = { ...row, llm_used };
   }
 
   const expirationDate = computeExpirationDate(prod.default_expiration_days);
+  const inv = await addOrRefreshInventory(prod.upc, expirationDate);
 
-  await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
-    [prod.upc, todayISO(), expirationDate, nowIso()]);
-
-  res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used: prod.llm_used ?? false });
+  res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used: prod.llm_used ?? false, id: inv.id, already_in_stock: inv.alreadyInStock });
 }));
 
 // 2d. Add an item manually (no barcode scan)
@@ -214,10 +236,9 @@ app.post('/api/add_manual', asyncHandler(async (req, res) => {
     ? expiration_date.trim()
     : computeExpirationDate(prod.default_expiration_days);
 
-  await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
-    [prod.upc, todayISO(), expirationDate, nowIso()]);
+  const inv = await addOrRefreshInventory(prod.upc, expirationDate);
 
-  res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used });
+  res.json({ success: true, product: { name: prod.name, category: prod.category }, expiration_date: expirationDate, llm_used, id: inv.id, already_in_stock: inv.alreadyInStock });
 }));
 
 // 2c. Merge Products
@@ -369,11 +390,9 @@ app.post('/api/add_by_name', asyncHandler(async (req, res) => {
   }
 
   const expirationDate = computeExpirationDate(prod.default_expiration_days);
+  const inv = await addOrRefreshInventory(prod.upc, expirationDate);
 
-  await run(`INSERT INTO inventory (upc, added_date, expiration_date, created_at) VALUES (?, ?, ?, ?)`,
-    [prod.upc, todayISO(), expirationDate, nowIso()]);
-
-  res.json({ success: true, message: `Added ${prod.name}`, llm_used: prod.llm_used ?? false });
+  res.json({ success: true, message: inv.alreadyInStock ? `${prod.name} already in stock` : `Added ${prod.name}`, llm_used: prod.llm_used ?? false, id: inv.id, already_in_stock: inv.alreadyInStock });
 }));
 
 // --- Express Error Handler ---

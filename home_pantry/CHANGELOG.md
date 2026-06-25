@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+- "One entry per product" inventory model: scanning (or adding) a product you
+  already have no longer creates a duplicate row — it refreshes the existing
+  item's dates instead. Applies to scan, manual add, and voice add; responses
+  now include `id` and `already_in_stock`.
+- Dashboard scan card lists items scanned this session, each with a **Consume**
+  button, so you can scan → confirm → consume without leaving the dashboard.
+  Requires a new `pantry_consume` rest_command (README Step 6).
+
+### Fixed
+- Consume → shopping list did nothing: the add-on called `todo.get_items`
+  without `return_response`, which HA rejects with HTTP 400 (it's a
+  response-only service); that error aborted the call before `add_item` ran. Now
+  it requests the response, parses it, and adds the item even if the lookup
+  fails.
+- Scanning a new barcode twice in quick succession could 500 with
+  `UNIQUE constraint failed: products.upc` (a race between two inserts). Product
+  creation in the scan routes is now idempotent (`INSERT OR IGNORE` + re-select).
+
+### Changed
+- Dashboard scan card de-dupes rapid repeats of the same barcode (holding the
+  scanner no longer adds the item several times) and shows a clearer ✓/⚠
+  confirmation in the scanner overlay. (Re-copy the card to `<config>/www/`.)
+
 ## 1.5.0
 
 ### Added

@@ -23,6 +23,10 @@ const NOTIFY_TYPE = 'bar_code/notify';
 const RESULT_TYPE = 'bar_code/scan_result';
 const ABORTED_TYPE = 'bar_code/aborted';
 
+// Holding the scanner on a barcode fires the same result repeatedly; ignore an
+// identical value seen again within this window so it isn't submitted twice.
+const DUPLICATE_WINDOW_MS = 3000;
+
 // External-bus message ids. Start high to avoid colliding with the frontend's
 // own low, incrementing ids.
 let msgId = 100000;
@@ -67,6 +71,7 @@ class HomePantryScanCard extends HTMLElement {
       {
         title: 'Scan to Pantry',
         service: 'rest_command.pantry_scan',
+        consume_service: 'rest_command.pantry_consume',
         data_key: 'upc',
         scan_title: 'Scan a barcode',
         scan_description: 'Point the camera at a product barcode',
@@ -74,8 +79,11 @@ class HomePantryScanCard extends HTMLElement {
       },
       config || {}
     );
-    this._activeId = null;
+    this._scanning = false;
     this._count = 0;
+    this._lastValue = null;
+    this._lastValueTime = 0;
+    this._recent = this._recent || []; // preserve across config changes
     this._build();
   }
 
@@ -106,8 +114,14 @@ class HomePantryScanCard extends HTMLElement {
 
     body.appendChild(this._btn);
     body.appendChild(this._status);
+
+    this._recentEl = document.createElement('div');
+    this._recentEl.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+    body.appendChild(this._recentEl);
+
     this._card.appendChild(body);
     this.appendChild(this._card);
+    this._renderRecent();
     this._reflectAvailability();
   }
 
@@ -127,9 +141,10 @@ class HomePantryScanCard extends HTMLElement {
   _startScan() {
     if (!busSender()) { this._reflectAvailability(); return; }
     this._count = 0;
-    this._activeId = ++msgId;
+    this._scanning = true;
+    this._lastValue = null; // fresh session: allow the same item to be added again
     const ok = sendToApp({
-      id: this._activeId,
+      id: ++msgId,
       type: SCAN_TYPE,
       payload: {
         title: this._config.scan_title,
@@ -140,22 +155,29 @@ class HomePantryScanCard extends HTMLElement {
     this._setStatus(ok
       ? `Scanner open — scan items, then tap “${this._config.cancel_label}”.`
       : 'Could not open the scanner.');
-    if (!ok) this._activeId = null;
+    if (!ok) this._scanning = false;
   }
 
-  // Observe incoming app->frontend messages by wrapping window.externalBus, while
-  // always forwarding to the frontend's own handler. Installed for the card's
-  // lifetime; it only acts while a scan session is active (_activeId set).
+  // Observe incoming app->frontend messages by wrapping window.externalBus.
+  // Scan results arrive as external-bus *commands*:
+  //   { id, type: "command", command: "bar_code/scan_result" | "bar_code/aborted", payload }
+  // We handle OUR commands and don't forward them (forwarding makes HA log
+  // "Unknown command" and send the app an error ack); everything else passes
+  // through to the frontend's own handler untouched. Installed for the card's
+  // lifetime; it only acts while a scan session is active.
   _installReceiver() {
     if (this._wrapped) return;
     const original = typeof window.externalBus === 'function' ? window.externalBus : null;
     this._origExternalBus = original;
     const self = this;
     this._wrapper = function (message) {
-      try {
-        const data = typeof message === 'string' ? JSON.parse(message) : message;
+      let data = null;
+      try { data = typeof message === 'string' ? JSON.parse(message) : message; } catch (e) { /* ignore */ }
+      if (self._scanning && data && data.type === 'command' &&
+          (data.command === RESULT_TYPE || data.command === ABORTED_TYPE)) {
         self._onAppMessage(data);
-      } catch (e) { /* not parseable / not for us */ }
+        return; // ours — handled; do not forward
+      }
       if (original) return original.apply(window, arguments);
     };
     window.externalBus = this._wrapper;
@@ -172,13 +194,25 @@ class HomePantryScanCard extends HTMLElement {
     this._wrapped = false;
   }
 
-  async _onAppMessage(data) {
-    if (!data || this._activeId == null) return;                 // only during an active scan
-    if (data.id != null && data.id !== this._activeId) return;   // ignore other sessions
-    if (data.type === RESULT_TYPE) {
+  // `data` is an external-bus command: { type: "command", command, payload }.
+  // The command's id is the app's own (NOT our scan request's), so we must not
+  // filter by id — we gate on the active scan session instead. The discriminator
+  // is `command`, not `type` (`type` is always "command" for incoming commands).
+  _onAppMessage(data) {
+    if (!this._scanning) return;
+    if (data.command === RESULT_TYPE) {
       const value = data.payload && data.payload.rawValue;
-      if (value) await this._handleScan(String(value));
-    } else if (data.type === ABORTED_TYPE) {
+      if (!value) return;
+      const v = String(value);
+      const now = Date.now();
+      // De-dupe: skip an identical value repeated within the window (holding the
+      // scanner on one barcode). A different value, or the same after the window,
+      // is accepted — so two of the same item can still be added deliberately.
+      if (v === this._lastValue && now - this._lastValueTime < DUPLICATE_WINDOW_MS) return;
+      this._lastValue = v;
+      this._lastValueTime = now;
+      this._handleScan(v); // async; handles its own errors
+    } else if (data.command === ABORTED_TYPE) {
       this._finishSession();
     }
   }
@@ -189,15 +223,19 @@ class HomePantryScanCard extends HTMLElement {
       const content = await this._sendToPantry(value);
       this._count++;
       if (content && content.success && content.product && content.product.name) {
+        const verb = content.already_in_stock ? 'Already in stock' : 'Added';
         const exp = content.expiration_date ? ` (exp ${content.expiration_date})` : '';
-        message = `Added ${content.product.name}${exp}`;
+        message = `✓ ${verb}: ${content.product.name}${exp}`;
+        // Track on the card's recent list so it can be consumed without leaving
+        // the dashboard. Needs the inventory id (requires HA service responses).
+        if (content.id != null) this._addRecent(content.product.name, content.id);
       } else if (content && content.needs_info) {
-        message = `Unknown barcode ${value} — open Home Pantry to add details`;
+        message = `⚠️ Unknown barcode — finish in the Home Pantry app`;
       } else {
-        message = `Sent ${value} to Home Pantry`;
+        message = `✓ Sent ${value} to Home Pantry`;
       }
     } catch (e) {
-      message = `Failed to send ${value}: ${(e && e.message) || e}`;
+      message = `✕ Failed: ${(e && e.message) || e}`;
     }
     this._setStatus(`${message} — ${this._count} sent this session`);
     // Best-effort feedback inside the scanner overlay (ignored if unsupported).
@@ -225,10 +263,75 @@ class HomePantryScanCard extends HTMLElement {
 
   _finishSession() {
     const n = this._count;
-    this._activeId = null;
+    this._scanning = false;
     this._setStatus(n > 0
       ? `Done — ${n} item${n === 1 ? '' : 's'} sent to Home Pantry.`
       : 'Scan canceled.');
+  }
+
+  // --- Recent items (scan → verify → consume, all on the dashboard) ---
+
+  _addRecent(name, id) {
+    if (this._recent.some(r => r.id === id)) return; // a re-scan refreshes the same row
+    this._recent.unshift({ name, id, consumed: false });
+    if (this._recent.length > 20) this._recent.length = 20;
+    this._renderRecent();
+  }
+
+  _renderRecent() {
+    if (!this._recentEl) return;
+    this._recentEl.textContent = '';
+    if (!this._recent || this._recent.length === 0) return;
+
+    const heading = document.createElement('div');
+    heading.textContent = 'Scanned this session';
+    heading.style.cssText = 'font-size:12px;color:var(--secondary-text-color);margin:6px 0 2px;';
+    this._recentEl.appendChild(heading);
+
+    for (const item of this._recent) {
+      const row = document.createElement('div');
+      row.style.cssText =
+        'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;' +
+        'border-bottom:1px solid var(--divider-color, rgba(127,127,127,0.2));';
+
+      const label = document.createElement('span');
+      label.textContent = item.name;
+      label.style.cssText =
+        'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+        (item.consumed ? 'text-decoration:line-through;opacity:0.6;' : '');
+
+      const btn = document.createElement('button');
+      btn.textContent = item.consumed ? 'Consumed' : 'Consume';
+      btn.disabled = !!item.consumed;
+      btn.style.cssText =
+        'flex:none;padding:4px 10px;border:1px solid var(--primary-color);border-radius:6px;' +
+        'background:transparent;color:var(--primary-color);cursor:pointer;font-size:13px;';
+      btn.addEventListener('click', () => this._consume(item, btn, label));
+
+      row.appendChild(label);
+      row.appendChild(btn);
+      this._recentEl.appendChild(row);
+    }
+  }
+
+  // Consume is fire-and-forget via the configured service (default
+  // rest_command.pantry_consume), so it works without HTTPS/CORS like the scan.
+  async _consume(item, btn, label) {
+    if (!this._hass) return;
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const parts = (this._config.consume_service || 'rest_command.pantry_consume').split('.');
+      await this._hass.callService(parts[0], parts.slice(1).join('.'), { id: item.id });
+      item.consumed = true;
+      btn.textContent = 'Consumed';
+      label.style.textDecoration = 'line-through';
+      label.style.opacity = '0.6';
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Consume';
+      this._setStatus(`✕ Consume failed: ${(e && e.message) || e}`);
+    }
   }
 }
 

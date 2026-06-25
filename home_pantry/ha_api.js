@@ -19,39 +19,45 @@ export async function addItemsToShoppingList(itemName) {
   if (!haBaseUrl || !haToken) return;
   const options = getOptions();
   const entityId = options.todo_list_entity_id || 'todo.shopping_list';
-  
+
+  // Look up current items so we can skip a duplicate. todo.get_items returns its
+  // result ONLY via the service response, so we must pass return_response or the
+  // Core API rejects the call with HTTP 400. Keep this in its own try: a
+  // get_items problem must NOT stop us from adding the item below.
+  let items = [];
   try {
-    // Check if the item already exists and is incomplete
-    const getRes = await client.post('/services/todo/get_items', {
+    const getRes = await client.post('/services/todo/get_items?return_response=true', {
       entity_id: entityId,
-      status: 'needs_action'
+      status: 'needs_action',
     });
-    
-    // The response data format depends on the HA version, but usually it's {"todo.shopping_list": {"items": [...]}}
-    let items = [];
-    if (getRes.data) {
-      // In newer HA versions, response data from services is an object, but some might be arrays
-      const data = Array.isArray(getRes.data) ? getRes.data[0] : getRes.data;
-      if (data && data.response && data.response[entityId]) {
-        items = data.response[entityId].items || [];
-      } else if (data && data[entityId]) {
-        items = data[entityId].items || [];
-      }
+    // return_response shape: { service_response: { <entityId>: { items: [...] } } }.
+    // Fall back to older array/`response` shapes just in case.
+    const data = getRes.data || {};
+    const sr = data.service_response || data.response || data;
+    const container = Array.isArray(sr) ? sr[0] : sr;
+    if (container && container[entityId] && Array.isArray(container[entityId].items)) {
+      items = container[entityId].items;
     }
-    
+  } catch (err) {
+    log.warning(
+      'todo.get_items failed; adding without a duplicate check: ' +
+        (err.response?.data ? JSON.stringify(err.response.data) : err.message)
+    );
+  }
+
+  try {
     const exists = items.some(i => i.summary && i.summary.toLowerCase() === itemName.toLowerCase());
     if (exists) {
       log.info(`Item ${itemName} is already on the shopping list. Skipping.`);
       return;
     }
-
-    await client.post('/services/todo/add_item', {
-      entity_id: entityId,
-      item: itemName
-    });
+    await client.post('/services/todo/add_item', { entity_id: entityId, item: itemName });
     log.info(`Added ${itemName} to ${entityId}`);
   } catch (err) {
-    log.error("Error adding to HA todo list:", err.message);
+    log.error(
+      'Error adding to HA todo list:',
+      err.response?.data ? JSON.stringify(err.response.data) : err.message
+    );
   }
 }
 

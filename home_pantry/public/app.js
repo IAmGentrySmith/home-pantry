@@ -545,7 +545,8 @@ async function addManual() {
     removeToast(toast);
     if (!res.ok) throw new Error(data.error || 'Unknown error');
     const expLabel = data.expiration_date || 'N/A';
-    showToast(`Added: ${data.product.name} (Exp: ${expLabel})`, 4000);
+    const verb = data.already_in_stock ? 'Already in stock' : 'Added';
+    showToast(`${verb}: ${data.product.name} (Exp: ${expLabel})`, 4000);
     loadInventory();
   } catch (err) {
     removeToast(toast);
@@ -736,8 +737,9 @@ async function onScanSuccess(decodedText, decodedResult) {
 
     if (data.success) {
       const expLabel = data.expiration_date || 'N/A';
-      const llmNote = data.llm_used === false ? ' — default, LLM unavailable' : '';
-      showToast(`Added: ${data.product.name} (Exp: ${expLabel}${llmNote})`, 4000);
+      const verb = data.already_in_stock ? 'Already in stock' : 'Added';
+      const llmNote = (!data.already_in_stock && data.llm_used === false) ? ' — default, LLM unavailable' : '';
+      showToast(`${verb}: ${data.product.name} (Exp: ${expLabel}${llmNote})`, 4000);
       loadInventory();
     } else if (data.needs_info) {
       const info = await showDialog({
@@ -762,8 +764,9 @@ async function onScanSuccess(decodedText, decodedResult) {
 
         if (customData.success) {
           const expLabel = customData.expiration_date || 'N/A';
-          const llmNote = customData.llm_used === false ? ' — default, LLM unavailable' : '';
-          showToast(`Added: ${customData.product.name} (Exp: ${expLabel}${llmNote})`, 4000);
+          const verb = customData.already_in_stock ? 'Already in stock' : 'Added';
+          const llmNote = (!customData.already_in_stock && customData.llm_used === false) ? ' — default, LLM unavailable' : '';
+          showToast(`${verb}: ${customData.product.name} (Exp: ${expLabel}${llmNote})`, 4000);
           loadInventory();
         } else {
           showToast("Error adding item: " + customData.error, 4000);

@@ -16,6 +16,13 @@
 #       content_type: 'application/json'
 #       headers:
 #         Authorization: "Bearer YOUR_API_TOKEN"
+#     pantry_consume:               # powers the per-item "Consume" button
+#       url: "http://homeassistant.local:8099/api/consume"
+#       method: post
+#       payload: '{"id": {{ id }}}'
+#       content_type: 'application/json'
+#       headers:
+#         Authorization: "Bearer YOUR_API_TOKEN"
 
 title: Pantry
 path: pantry
